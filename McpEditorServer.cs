@@ -121,7 +121,7 @@ public sealed class McpEditorServer {
             m_Server.Start();
             m_IsRunning = true;
 
-            m_Logger.LogInformation("Server started on ws://localhost:{Port}/", port);
+            m_Logger.LogDebug("Server started on ws://localhost:{Port}/", port);
         } catch (Exception ex) {
             m_Logger.LogError(ex, "Failed to start server");
             m_IsRunning = false;
