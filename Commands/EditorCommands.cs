@@ -1,6 +1,8 @@
 using System.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 using Vecerdi.UnityMcp.Protocol;
 
 namespace Vecerdi.UnityMcp.Commands;
@@ -129,9 +131,9 @@ public sealed class GetOpenScenesCommand : IMcpCommandHandler {
     public string Command => "unity.editor.getOpenScenes";
 
     public McpResponse Execute(McpRequest request) {
-        var sceneCount = UnityEngine.SceneManagement.SceneManager.sceneCount;
+        var sceneCount = SceneManager.sceneCount;
         var scenes = Enumerable.Range(0, sceneCount)
-            .Select(i => UnityEngine.SceneManagement.SceneManager.GetSceneAt(i))
+            .Select(i => SceneManager.GetSceneAt(i))
             .Select(s => new {
                 name = s.name,
                 path = s.path,
@@ -156,7 +158,7 @@ public sealed class SaveAllCommand : IMcpCommandHandler {
         AssetDatabase.SaveAssets();
 
         // Save all open scenes
-        UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes();
+        EditorSceneManager.SaveOpenScenes();
 
         return McpResponse.Ok(request.Id, new { saved = true });
     }
@@ -171,5 +173,28 @@ public sealed class RefreshAssetsCommand : IMcpCommandHandler {
     public McpResponse Execute(McpRequest request) {
         AssetDatabase.Refresh();
         return McpResponse.Ok(request.Id, new { refreshed = true });
+    }
+}
+
+/// <summary>
+/// Command: unity.editor.executeMenuItem - Execute a Unity menu item by path.
+/// </summary>
+public sealed class ExecuteMenuItemCommand : IMcpCommandHandler {
+    public string Command => "unity.editor.executeMenuItem";
+
+    public McpResponse Execute(McpRequest request) {
+        var menuItem = request.GetParam<string>("menuItem");
+
+        if (string.IsNullOrEmpty(menuItem)) {
+            return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, "menuItem parameter is required");
+        }
+
+        var executed = EditorApplication.ExecuteMenuItem(menuItem);
+
+        if (!executed) {
+            return McpResponse.Fail(request.Id, "MENU_ITEM_NOT_FOUND", $"Menu item not found or could not be executed: {menuItem}");
+        }
+
+        return McpResponse.Ok(request.Id, new { executed = true, menuItem });
     }
 }

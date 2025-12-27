@@ -295,6 +295,20 @@ public sealed class UnityTools(UnityClient unityClient) {
         return "Asset database refreshed.";
     }
 
+    /// <summary>
+    /// Execute a Unity Editor menu item by its path.
+    /// </summary>
+    [McpServerTool(Name = "execute_menu_item"), Description("Execute a Unity Editor menu item by its path (e.g., 'File/Save Project', 'Edit/Project Settings...', 'Window/General/Console').")]
+    public async Task<string> ExecuteMenuItem(
+        [Description("The menu item path to execute (e.g., 'File/Save Project')")] string menuItem,
+        CancellationToken ct = default
+    ) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.executeMenuItem", new { menuItem }, ct);
+        EnsureSuccess(response);
+        return $"Executed menu item: {menuItem}";
+    }
+
     // Helper methods
     private async Task EnsureConnectedAsync(CancellationToken ct) {
         if (unityClient.IsConnected) return;

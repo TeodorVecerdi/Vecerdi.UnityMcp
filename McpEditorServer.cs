@@ -24,7 +24,7 @@ public sealed class McpEditorServer {
     public static int ConnectionCount => s_Instance?.m_ConnectionCount ?? 0;
 
     private readonly McpCommandRegistry m_Commands = new();
-    private readonly LogBuffer m_LogBuffer = new(1000);
+    private readonly LogBuffer m_LogBuffer = new();
     private readonly ConcurrentQueue<(McpRequest Request, Action<McpResponse> SendResponse)> m_PendingRequests = new();
     private readonly ILogger<McpEditorServer> m_Logger = UnityLoggerFactory.CreateLogger<McpEditorServer>();
 
@@ -98,6 +98,7 @@ public sealed class McpEditorServer {
 
         // Meta command to list available commands
         m_Commands.Register(new ListCommandsHandler(m_Commands));
+        m_Commands.Register(new ExecuteMenuItemCommand());
     }
 
     public void Start(int port = 9999) {
