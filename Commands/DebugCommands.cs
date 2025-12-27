@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using Microsoft.Extensions.Logging;
 using UnityEngine;
 using Vecerdi.UnityMcp.Protocol;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Vecerdi.UnityMcp.Commands;
 
@@ -122,13 +125,24 @@ public sealed class GetLogsCommand(LogBuffer logBuffer) : IMcpCommandHandler {
 }
 
 /// <summary>
-/// Command: unity.debug.clearLogs - Clear the log buffer.
+/// Command: unity.debug.clearLogs - Clear the log buffer and Unity Console.
 /// </summary>
-public sealed class ClearLogsCommand(LogBuffer logBuffer) : IMcpCommandHandler {
+public sealed class ClearLogsCommand(LogBuffer logBuffer, ILogger? logger = null) : IMcpCommandHandler {
     public string Command => "unity.debug.clearLogs";
 
     public McpResponse Execute(McpRequest request) {
+        // Clear our internal buffer
         logBuffer.Clear();
+
+        // Clear Unity's Console window using reflection (internal API)
+        try {
+            var logEntriesType = Type.GetType("UnityEditor.LogEntries, UnityEditor");
+            var clearMethod = logEntriesType?.GetMethod("Clear", BindingFlags.Static | BindingFlags.Public);
+            clearMethod?.Invoke(null, null);
+        } catch (Exception ex) {
+            logger?.LogWarning(ex, "Failed to clear Unity Console");
+        }
+
         return McpResponse.Ok(request.Id, new { cleared = true });
     }
 }

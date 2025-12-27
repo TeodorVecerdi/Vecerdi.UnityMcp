@@ -81,7 +81,7 @@ public sealed class McpEditorServer {
     private void RegisterCommands() {
         // Debug commands
         m_Commands.Register(new GetLogsCommand(m_LogBuffer));
-        m_Commands.Register(new ClearLogsCommand(m_LogBuffer));
+        m_Commands.Register(new ClearLogsCommand(m_LogBuffer, m_Logger));
 
         // Editor commands
         m_Commands.Register(new RecompileCommand());
