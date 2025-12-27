@@ -49,6 +49,7 @@ public sealed class McpEditorServer {
 
         // Cleanup on domain unload
         AssemblyReloadEvents.beforeAssemblyReload += () => {
+            s_Instance?.m_LogBuffer.Dispose();
             s_Instance?.Stop();
         };
     }

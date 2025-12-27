@@ -22,7 +22,7 @@ public sealed class LogEntry {
 /// <summary>
 /// Captures and stores Unity console logs.
 /// </summary>
-public sealed class LogBuffer {
+public sealed class LogBuffer : IDisposable {
     private readonly object m_Lock = new();
     private readonly LinkedList<LogEntry> m_Logs = new();
     private int m_MaxSize;
