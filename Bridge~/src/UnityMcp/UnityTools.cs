@@ -40,7 +40,7 @@ public static class UnityTools {
     public static readonly List<UnityTool> All = [
         // Debug commands
         new UnityTool {
-            Name = "unity_get_logs",
+            Name = "get_logs",
             Description = "Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.",
             UnityCommand = "unity.debug.getLogs",
             InputSchema = new InputSchema {
@@ -96,21 +96,21 @@ public static class UnityTools {
         },
 
         new UnityTool {
-            Name = "unity_clear_logs",
+            Name = "clear_logs",
             Description = "Clear the Unity console log buffer.",
             UnityCommand = "unity.debug.clearLogs",
         },
 
         // Editor commands
         new UnityTool {
-            Name = "unity_recompile",
+            Name = "recompile",
             Description = "Force Unity to recompile all scripts. Use this after making code changes to verify they compile. This is a blocking call that waits for compilation to complete and returns any errors.",
             UnityCommand = "unity.editor.recompile",
             // Note: FormatResponse not used - special handling in Program.cs
         },
 
         new UnityTool {
-            Name = "unity_get_compilation_status",
+            Name = "get_compilation_status",
             Description = "Check if Unity is currently compiling scripts.",
             UnityCommand = "unity.editor.getCompilationStatus",
             FormatResponse = result => {
@@ -126,7 +126,7 @@ public static class UnityTools {
         },
 
         new UnityTool {
-            Name = "unity_get_play_mode_state",
+            Name = "get_play_mode_state",
             Description = "Check if Unity Editor is in play mode, paused, or stopped.",
             UnityCommand = "unity.editor.isPlaying",
             FormatResponse = result => {
@@ -142,7 +142,7 @@ public static class UnityTools {
         },
 
         new UnityTool {
-            Name = "unity_enter_play_mode",
+            Name = "enter_play_mode",
             Description = "Start Play mode in the Unity Editor to test the game.",
             UnityCommand = "unity.editor.enterPlayMode",
             FormatResponse = result => {
@@ -157,7 +157,7 @@ public static class UnityTools {
         },
 
         new UnityTool {
-            Name = "unity_exit_play_mode",
+            Name = "exit_play_mode",
             Description = "Stop Play mode and return to Edit mode.",
             UnityCommand = "unity.editor.exitPlayMode",
             FormatResponse = result => {
@@ -172,19 +172,19 @@ public static class UnityTools {
         },
 
         new UnityTool {
-            Name = "unity_pause_play_mode",
+            Name = "pause_play_mode",
             Description = "Pause the game while in Play mode.",
             UnityCommand = "unity.editor.pausePlayMode",
         },
 
         new UnityTool {
-            Name = "unity_resume_play_mode",
+            Name = "resume_play_mode",
             Description = "Resume the game after pausing in Play mode.",
             UnityCommand = "unity.editor.resumePlayMode",
         },
 
         new UnityTool {
-            Name = "unity_get_open_scenes",
+            Name = "get_open_scenes",
             Description = "Get a list of currently open scenes in the Unity Editor.",
             UnityCommand = "unity.editor.getOpenScenes",
             FormatResponse = result => {
@@ -213,14 +213,14 @@ public static class UnityTools {
         },
 
         new UnityTool {
-            Name = "unity_save_all",
+            Name = "save_all",
             Description = "Save all open scenes and modified assets.",
             UnityCommand = "unity.editor.saveAll",
             FormatResponse = _ => "All scenes and assets saved.",
         },
 
         new UnityTool {
-            Name = "unity_refresh_assets",
+            Name = "refresh_assets",
             Description = "Refresh the Unity Asset Database to detect external file changes.",
             UnityCommand = "unity.editor.refreshAssets",
             FormatResponse = _ => "Asset database refreshed.",

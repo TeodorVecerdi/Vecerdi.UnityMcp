@@ -148,7 +148,7 @@ static async Task<JsonRpcResponse> HandleToolsCallAsync(
     }
 
     // Special handling for recompile - blocks until compilation completes
-    if (callParams.Name == "unity_recompile") {
+    if (callParams.Name == "recompile") {
         return await HandleRecompileAsync(request, unityClient, log, ct);
     }
 
