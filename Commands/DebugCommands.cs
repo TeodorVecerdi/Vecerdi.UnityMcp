@@ -16,7 +16,7 @@ public sealed class LogEntry {
     public string Level { get; init; } = "info";
     public string Message { get; init; } = string.Empty;
     public string? StackTrace { get; init; }
-    public DateTime Timestamp { get; init; }
+    public DateTimeOffset Timestamp { get; init; }
 }
 
 /// <summary>
@@ -55,7 +55,7 @@ public sealed class LogBuffer {
             },
             Message = message,
             StackTrace = string.IsNullOrEmpty(stackTrace) ? null : stackTrace,
-            Timestamp = DateTime.UtcNow,
+            Timestamp = DateTimeOffset.UtcNow,
         };
 
         lock (m_Lock) {
