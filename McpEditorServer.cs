@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using UnityEditor;
-using UnityEngine;
+using Vecerdi.Extensions.Logging;
 using Vecerdi.UnityMcp.Commands;
 using Vecerdi.UnityMcp.Protocol;
 using WebSocketSharp;
@@ -25,6 +26,7 @@ public sealed class McpEditorServer {
     private readonly McpCommandRegistry m_Commands = new();
     private readonly LogBuffer m_LogBuffer = new(1000);
     private readonly ConcurrentQueue<(McpRequest Request, Action<McpResponse> SendResponse)> m_PendingRequests = new();
+    private readonly ILogger<McpEditorServer> m_Logger = UnityLoggerFactory.CreateLogger<McpEditorServer>();
 
     private WebSocketServer? m_Server;
     private bool m_IsRunning;
@@ -99,7 +101,7 @@ public sealed class McpEditorServer {
 
     public void Start(int port = 9999) {
         if (m_IsRunning) {
-            Debug.Log($"[UnityMcp] Server already running on port {m_Port}");
+            m_Logger.LogDebug("Server already running on port {Port}", m_Port);
             return;
         }
 
@@ -107,13 +109,13 @@ public sealed class McpEditorServer {
 
         try {
             m_Server = new WebSocketServer($"ws://localhost:{port}");
-            m_Server.AddWebSocketService<McpBehavior>("/", behavior => behavior.Initialize(this));
+            m_Server.AddWebSocketService<McpBehavior>("/", behavior => behavior.Initialize(this, m_Logger));
             m_Server.Start();
             m_IsRunning = true;
 
-            Debug.Log($"[UnityMcp] Server started on ws://localhost:{port}/");
+            m_Logger.LogInformation("Server started on ws://localhost:{Port}/", port);
         } catch (Exception ex) {
-            Debug.LogError($"[UnityMcp] Failed to start server: {ex.Message}");
+            m_Logger.LogError(ex, "Failed to start server");
             m_IsRunning = false;
         }
     }
@@ -121,7 +123,7 @@ public sealed class McpEditorServer {
     public void Stop() {
         if (!m_IsRunning) return;
 
-        Debug.Log("[UnityMcp] Stopping server...");
+        m_Logger.LogDebug("Stopping server...");
 
         m_Server?.Stop();
         m_Server = null;
@@ -129,17 +131,17 @@ public sealed class McpEditorServer {
         m_IsRunning = false;
         m_ConnectionCount = 0;
 
-        Debug.Log("[UnityMcp] Server stopped.");
+        m_Logger.LogDebug("Server stopped");
     }
 
     internal void OnClientConnected() {
         m_ConnectionCount++;
-        Debug.Log($"[UnityMcp] Client connected. Total connections: {m_ConnectionCount}");
+        m_Logger.LogDebug("Client connected. Total connections: {ConnectionCount}", m_ConnectionCount);
     }
 
     internal void OnClientDisconnected() {
         m_ConnectionCount = Math.Max(0, m_ConnectionCount - 1);
-        Debug.Log($"[UnityMcp] Client disconnected. Total connections: {m_ConnectionCount}");
+        m_Logger.LogDebug("Client disconnected. Total connections: {ConnectionCount}", m_ConnectionCount);
     }
 
     internal void QueueRequest(McpRequest request, Action<McpResponse> sendResponse) {
@@ -162,9 +164,11 @@ public sealed class McpEditorServer {
     /// </summary>
     private sealed class McpBehavior : WebSocketBehavior {
         private McpEditorServer? m_Server;
+        private ILogger? m_Logger;
 
-        public void Initialize(McpEditorServer server) {
+        public void Initialize(McpEditorServer server, ILogger logger) {
             m_Server = server;
+            m_Logger = logger;
         }
 
         protected override void OnOpen() {
@@ -188,6 +192,7 @@ public sealed class McpEditorServer {
                     Send(json);
                 });
             } catch (JsonException ex) {
+                m_Logger?.LogWarning(ex, "Failed to parse MCP request");
                 var errorResponse = McpResponse.Fail("", McpErrorCodes.InvalidParams, $"Invalid JSON: {ex.Message}");
                 var json = JsonSerializer.Serialize(errorResponse, s_JsonOptions);
                 Send(json);
@@ -195,7 +200,7 @@ public sealed class McpEditorServer {
         }
 
         protected override void OnError(ErrorEventArgs e) {
-            Debug.LogWarning($"[UnityMcp] WebSocket error: {e.Message}");
+            m_Logger?.LogWarning("WebSocket error: {Message}", e.Message);
         }
     }
 
