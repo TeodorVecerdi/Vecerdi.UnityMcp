@@ -104,9 +104,9 @@ public static class UnityTools {
         // Editor commands
         new UnityTool {
             Name = "unity_recompile",
-            Description = "Force Unity to recompile all scripts. Use this after making code changes to verify they compile.",
+            Description = "Force Unity to recompile all scripts. Use this after making code changes to verify they compile. This is a blocking call that waits for compilation to complete and returns any errors.",
             UnityCommand = "unity.editor.recompile",
-            FormatResponse = _ => "Script recompilation requested. Use unity_get_compilation_status to check progress.",
+            // Note: FormatResponse not used - special handling in Program.cs
         },
 
         new UnityTool {
