@@ -86,7 +86,7 @@ public sealed class McpEditorServer {
 
         // Editor commands
         m_Commands.Register(new RecompileCommand());
-        m_Commands.Register(new GetCompilationStatusCommand());
+        m_Commands.Register(new GetCompilationStatusCommand()); // Used internally by MCP recompile tool
         m_Commands.Register(new IsPlayingCommand());
         m_Commands.Register(new EnterPlayModeCommand());
         m_Commands.Register(new ExitPlayModeCommand());

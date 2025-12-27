@@ -146,25 +146,6 @@ public sealed class UnityTools(UnityClient unityClient) {
     }
 
     /// <summary>
-    /// Check if Unity is currently compiling scripts.
-    /// </summary>
-    [McpServerTool(Name = "get_compilation_status"), Description("Check if Unity is currently compiling scripts.")]
-    public async Task<string> GetCompilationStatus(CancellationToken ct = default) {
-        await EnsureConnectedAsync(ct);
-        var response = await unityClient.SendAsync("unity.editor.getCompilationStatus", null, ct);
-        EnsureSuccess(response);
-
-        if (response.Result is not { } result) return "Unable to get compilation status.";
-
-        var isCompiling = result.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
-        var isUpdating = result.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
-
-        if (isCompiling) return "Unity is currently compiling scripts...";
-        if (isUpdating) return "Unity is updating (importing assets, etc.)...";
-        return "Unity is idle (not compiling).";
-    }
-
-    /// <summary>
     /// Check if Unity Editor is in play mode, paused, or stopped.
     /// </summary>
     [McpServerTool(Name = "get_play_mode_state"), Description("Check if Unity Editor is in play mode, paused, or stopped.")]
