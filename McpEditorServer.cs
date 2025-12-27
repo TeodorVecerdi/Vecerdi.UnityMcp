@@ -37,20 +37,39 @@ public sealed class McpEditorServer {
     };
 
     static McpEditorServer() {
-        // Auto-start on editor load
-        EditorApplication.delayCall += () => {
-            if (!IsRunning) {
-                Instance.Start();
-            }
-        };
+        // Auto-start on editor load - use both delayCall and update to ensure
+        // server starts even if editor doesn't have focus
+        EditorApplication.delayCall += TryStartServer;
 
-        // Process requests on main thread
-        EditorApplication.update += ProcessPendingRequests;
+        // Also try to start on update (will be a no-op if already running)
+        // This ensures the server starts even when Unity doesn't have focus
+        EditorApplication.update += OnEditorUpdate;
 
         // Cleanup on domain unload
         AssemblyReloadEvents.beforeAssemblyReload += () => {
             s_Instance?.Stop();
         };
+    }
+
+    private static bool s_StartupAttempted;
+
+    private static void TryStartServer() {
+        if (!IsRunning) {
+            Instance.Start();
+        }
+    }
+
+    private static void OnEditorUpdate() {
+        // Process pending requests on main thread
+        ProcessPendingRequests();
+
+        // Try to start server if not yet started (handles case where editor wasn't focused)
+        if (!s_StartupAttempted) {
+            s_StartupAttempted = true;
+            if (!IsRunning) {
+                Instance.Start();
+            }
+        }
     }
 
     private McpEditorServer() {
