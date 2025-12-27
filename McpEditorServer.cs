@@ -95,9 +95,6 @@ public sealed class McpEditorServer {
         m_Commands.Register(new GetOpenScenesCommand());
         m_Commands.Register(new SaveAllCommand());
         m_Commands.Register(new RefreshAssetsCommand());
-
-        // Meta command to list available commands
-        m_Commands.Register(new ListCommandsHandler(m_Commands));
         m_Commands.Register(new ExecuteMenuItemCommand());
     }
 
@@ -203,19 +200,6 @@ public sealed class McpEditorServer {
 
         protected override void OnError(ErrorEventArgs e) {
             m_Logger?.LogWarning("WebSocket error: {Message}", e.Message);
-        }
-    }
-
-    /// <summary>
-    /// Meta command that lists all available commands.
-    /// </summary>
-    private sealed class ListCommandsHandler(McpCommandRegistry registry) : IMcpCommandHandler {
-        public string Command => "unity.listCommands";
-
-        public McpResponse Execute(McpRequest request) {
-            return McpResponse.Ok(request.Id, new {
-                commands = registry.GetCommands(),
-            });
         }
     }
 }
