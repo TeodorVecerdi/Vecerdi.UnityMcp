@@ -290,15 +290,85 @@ public sealed class UnityTools(UnityClient unityClient) {
         return $"Executed menu item: {menuItem}";
     }
 
+    /// <summary>
+    /// List all available Unity Editor instances.
+    /// </summary>
+    [McpServerTool(Name = "list_editors"), Description("List all available Unity Editor instances that can be controlled via MCP.")]
+    public string ListEditors() {
+        var editors = EditorDiscovery.GetAvailableEditors();
+
+        if (editors.Count == 0) {
+            return "No Unity Editor instances found. Make sure Unity is running with the MCP plugin installed.";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Found {editors.Count} Unity Editor instance(s):");
+        sb.AppendLine();
+
+        var currentUri = unityClient.CurrentUri;
+
+        foreach (var editor in editors) {
+            var uri = EditorDiscovery.GetEditorUri(editor);
+            var isConnected = uri == currentUri && unityClient.IsConnected;
+            var marker = isConnected ? " [CONNECTED]" : "";
+
+            sb.AppendLine($"  Port {editor.Port}:{marker}");
+            sb.AppendLine($"    Project: {editor.ProjectName}");
+            sb.AppendLine($"    Path: {editor.ProjectPath}");
+            sb.AppendLine($"    PID: {editor.ProcessId}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Select which Unity Editor instance to control.
+    /// </summary>
+    [McpServerTool(Name = "select_editor"), Description("Select which Unity Editor instance to control. Use 'list_editors' first to see available instances.")]
+    public async Task<string> SelectEditor(
+        [Description("The port number of the Unity Editor instance to connect to")] int port,
+        CancellationToken ct = default
+    ) {
+        var editor = EditorDiscovery.FindEditorByPort(port);
+
+        if (editor is null) {
+            return $"No Unity Editor found on port {port}. Use 'list_editors' to see available instances.";
+        }
+
+        await unityClient.SetTargetAsync(editor);
+
+        try {
+            await unityClient.ConnectAsync(ct);
+            return $"Connected to Unity Editor: {editor.ProjectName} (port {port})";
+        } catch (Exception ex) {
+            return $"Found editor on port {port} but failed to connect: {ex.Message}";
+        }
+    }
+
     // Helper methods
     private async Task EnsureConnectedAsync(CancellationToken ct) {
         if (unityClient.IsConnected) return;
 
+        // Auto-discover and connect if there's exactly one editor available
+        var editors = EditorDiscovery.GetAvailableEditors();
+        if (editors.Count == 1) {
+            await unityClient.SetTargetAsync(editors[0]);
+        } else if (editors.Count > 1) {
+            throw new InvalidOperationException(
+                $"Multiple Unity Editors found ({editors.Count}). Use 'list_editors' to see them and 'select_editor' to choose one."
+            );
+        }
+
         try {
             await unityClient.ConnectAsync(ct);
         } catch (Exception ex) {
+            var hint = editors.Count == 0
+                ? "Make sure Unity Editor is running and the MCP plugin is active."
+                : $"Found {editors.Count} editor(s) but failed to connect.";
+
             throw new InvalidOperationException(
-                $"Failed to connect to Unity Editor: {ex.Message}\n\nMake sure Unity Editor is running and the MCP plugin is active.",
+                $"Failed to connect to Unity Editor: {ex.Message}\n\n{hint}",
                 ex
             );
         }

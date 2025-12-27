@@ -98,10 +98,19 @@ public sealed class McpEditorServer {
         m_Commands.Register(new ExecuteMenuItemCommand());
     }
 
-    public void Start(int port = 9999) {
+    public void Start(int port = -1) {
         if (m_IsRunning) {
             m_Logger.LogDebug("Server already running on port {Port}", m_Port);
             return;
+        }
+
+        // If no port specified, use dynamic allocation
+        if (port == -1) {
+            port = EditorInstanceRegistry.RegisterInstance(m_Logger);
+            if (port == -1) {
+                m_Logger.LogError("Failed to allocate port for MCP server");
+                return;
+            }
         }
 
         m_Port = port;
@@ -123,6 +132,9 @@ public sealed class McpEditorServer {
         if (!m_IsRunning) return;
 
         m_Logger.LogDebug("Stopping server...");
+
+        // Unregister from discovery file
+        EditorInstanceRegistry.UnregisterInstance(m_Port, m_Logger);
 
         m_Server?.Stop();
         m_Server = null;
