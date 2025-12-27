@@ -1,231 +1,321 @@
+using System.ComponentModel;
+using System.Text;
 using System.Text.Json;
-using UnityMcp.Mcp;
+using ModelContextProtocol.Server;
 
 namespace UnityMcp;
 
 /// <summary>
-/// Defines an MCP tool that maps to a Unity command.
+/// MCP tools for interacting with Unity Editor.
 /// </summary>
-public sealed class UnityTool {
-    public required string Name { get; init; }
-    public required string Description { get; init; }
-    public required string UnityCommand { get; init; }
-    public InputSchema InputSchema { get; init; } = new();
+[McpServerToolType]
+public sealed class UnityTools(UnityClient unityClient) {
+    /// <summary>
+    /// Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.
+    /// </summary>
+    [McpServerTool(Name = "get_logs"), Description("Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.")]
+    public async Task<string> GetLogs(
+        [Description("Maximum number of log entries to return (default: 100)")] int count = 100,
+        [Description("Minimum log level to include: info, warning, or error")] string? minLevel = null,
+        [Description("Filter logs containing this text (case-insensitive)")] string? filter = null,
+        CancellationToken ct = default
+    ) {
+        await EnsureConnectedAsync(ct);
+
+        var parameters = new Dictionary<string, object?> { ["count"] = count };
+        if (minLevel is not null) parameters["minLevel"] = minLevel;
+        if (filter is not null) parameters["filter"] = filter;
+
+        var response = await unityClient.SendAsync("unity.debug.getLogs", parameters, ct);
+        EnsureSuccess(response);
+
+        if (response.Result is not { } result) return "No logs available.";
+
+        if (result.TryGetProperty("logs", out var logs) && logs.ValueKind == JsonValueKind.Array) {
+            var logCount = logs.GetArrayLength();
+            if (logCount == 0) return "No logs matching the criteria.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Found {logCount} log entries:");
+            sb.AppendLine();
+
+            foreach (var log in logs.EnumerateArray()) {
+                var level = log.GetProperty("level").GetString()?.ToUpper() ?? "INFO";
+                var message = log.GetProperty("message").GetString() ?? "";
+                sb.AppendLine($"[{level}] {message}");
+
+                if (log.TryGetProperty("stackTrace", out var stackTrace) &&
+                    stackTrace.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrEmpty(stackTrace.GetString())) {
+                    sb.AppendLine($"  Stack: {stackTrace.GetString()}");
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+    }
 
     /// <summary>
-    /// Transform MCP arguments to Unity parameters (optional).
+    /// Clear the Unity console log buffer.
     /// </summary>
-    public Func<Dictionary<string, object>?, object?>? TransformParams { get; init; }
+    [McpServerTool(Name = "clear_logs"), Description("Clear the Unity console log buffer.")]
+    public async Task<string> ClearLogs(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.debug.clearLogs", null, ct);
+        EnsureSuccess(response);
+        return "Log buffer cleared.";
+    }
 
     /// <summary>
-    /// Format Unity response for MCP (optional).
+    /// Force Unity to recompile all scripts. This is a blocking call that waits for
+    /// compilation to complete and returns any errors.
     /// </summary>
-    public Func<JsonElement?, string>? FormatResponse { get; init; }
+    [McpServerTool(Name = "recompile"), Description("Force Unity to recompile all scripts. Use this after making code changes to verify they compile. This is a blocking call that waits for compilation to complete and returns any errors.")]
+    public async Task<string> Recompile(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
 
-    public ToolDefinition ToDefinition() => new() {
-        Name = Name,
-        Description = Description,
-        InputSchema = InputSchema,
-    };
-}
+        // Step 1: Send recompile command (connection may drop due to domain reload)
+        try {
+            await unityClient.SendAsync("unity.editor.recompile", null, ct);
+        } catch {
+            // Expected - connection drops during domain reload
+        }
 
-/// <summary>
-/// Registry of all Unity tools exposed via MCP.
-/// </summary>
-public static class UnityTools {
-    private static readonly JsonSerializerOptions s_JsonOptions = new() {
-        WriteIndented = true,
-    };
+        // Step 2: Wait for Unity to come back after domain reload
+        await Task.Delay(1000, ct);
 
-    public static readonly List<UnityTool> All = [
-        // Debug commands
-        new UnityTool {
-            Name = "get_logs",
-            Description = "Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.",
-            UnityCommand = "unity.debug.getLogs",
-            InputSchema = new InputSchema {
-                Properties = new Dictionary<string, PropertySchema> {
-                    ["count"] = new() {
-                        Type = "integer",
-                        Description = "Maximum number of log entries to return (default: 100)",
-                        Default = 100,
-                    },
-                    ["minLevel"] = new() {
-                        Type = "string",
-                        Description = "Minimum log level to include",
-                        Enum = ["info", "warning", "error"],
-                    },
-                    ["filter"] = new() {
-                        Type = "string",
-                        Description = "Filter logs containing this text (case-insensitive)",
-                    },
-                },
-            },
-            FormatResponse = result => {
-                if (result is null) return "No logs available.";
+        var reconnected = await unityClient.WaitForConnectionAsync(
+            timeout: TimeSpan.FromSeconds(60),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            ct
+        );
 
-                if (result.Value.TryGetProperty("logs", out var logs) && logs.ValueKind == JsonValueKind.Array) {
-                    var count = logs.GetArrayLength();
-                    if (count == 0) return "No logs matching the criteria.";
+        if (!reconnected) {
+            return "Timed out waiting for Unity to reconnect after recompile. The Editor may still be compiling or may have encountered a fatal error.";
+        }
 
-                    var sb = new System.Text.StringBuilder();
-                    sb.AppendLine($"Found {count} log entries:");
-                    sb.AppendLine();
+        // Step 3: Wait for compilation to complete
+        await Task.Delay(500, ct);
 
-                    foreach (var log in logs.EnumerateArray()) {
-                        var level = log.GetProperty("level").GetString()?.ToUpper() ?? "INFO";
-                        var message = log.GetProperty("message").GetString() ?? "";
-                        var timestamp = log.TryGetProperty("timestamp", out var ts)
-                            ? ts.GetString() ?? ""
-                            : "";
+        var compilationTimeout = DateTime.UtcNow + TimeSpan.FromSeconds(120);
+        while (DateTime.UtcNow < compilationTimeout && !ct.IsCancellationRequested) {
+            try {
+                var statusResponse = await unityClient.SendAsync("unity.editor.getCompilationStatus", null, ct);
+                if (statusResponse is { Success: true, Result: not null }) {
+                    var isCompiling = statusResponse.Result.Value.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
+                    var isUpdating = statusResponse.Result.Value.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
 
-                        sb.AppendLine($"[{level}] {message}");
+                    if (!isCompiling && !isUpdating) break;
+                }
+            } catch {
+                await unityClient.WaitForConnectionAsync(TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(500), ct);
+            }
 
-                        if (log.TryGetProperty("stackTrace", out var stackTrace) &&
-                            stackTrace.ValueKind == JsonValueKind.String &&
-                            !string.IsNullOrEmpty(stackTrace.GetString())) {
-                            sb.AppendLine($"  Stack: {stackTrace.GetString()}");
-                        }
+            await Task.Delay(1000, ct);
+        }
+
+        // Step 4: Check for compilation errors
+        try {
+            var logsResponse = await unityClient.SendAsync("unity.debug.getLogs", new { count = 100, minLevel = "error" }, ct);
+
+            if (logsResponse is { Success: true, Result: not null } && logsResponse.Result.Value.TryGetProperty("logs", out var logs) && logs.ValueKind == JsonValueKind.Array && logs.GetArrayLength() > 0) {
+                var sb = new StringBuilder();
+                sb.AppendLine("Compilation completed with errors:");
+                sb.AppendLine();
+
+                foreach (var logEntry in logs.EnumerateArray()) {
+                    var message = logEntry.TryGetProperty("message", out var m) ? m.GetString() : "";
+                    sb.AppendLine($"[ERROR] {message}");
+
+                    if (logEntry.TryGetProperty("stackTrace", out var stackTrace) &&
+                        stackTrace.ValueKind == JsonValueKind.String &&
+                        !string.IsNullOrEmpty(stackTrace.GetString())) {
+                        sb.AppendLine($"  {stackTrace.GetString()}");
                     }
-
-                    return sb.ToString();
                 }
 
-                return JsonSerializer.Serialize(result, s_JsonOptions);
-            },
-        },
+                return sb.ToString();
+            }
 
-        new UnityTool {
-            Name = "clear_logs",
-            Description = "Clear the Unity console log buffer.",
-            UnityCommand = "unity.debug.clearLogs",
-        },
+            return "Compilation completed successfully with no errors.";
+        } catch {
+            return "Recompile triggered. Unable to verify completion status - check Unity Editor manually.";
+        }
+    }
 
-        // Editor commands
-        new UnityTool {
-            Name = "recompile",
-            Description = "Force Unity to recompile all scripts. Use this after making code changes to verify they compile. This is a blocking call that waits for compilation to complete and returns any errors.",
-            UnityCommand = "unity.editor.recompile",
-            // Note: FormatResponse not used - special handling in Program.cs
-        },
+    /// <summary>
+    /// Check if Unity is currently compiling scripts.
+    /// </summary>
+    [McpServerTool(Name = "get_compilation_status"), Description("Check if Unity is currently compiling scripts.")]
+    public async Task<string> GetCompilationStatus(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.getCompilationStatus", null, ct);
+        EnsureSuccess(response);
 
-        new UnityTool {
-            Name = "get_compilation_status",
-            Description = "Check if Unity is currently compiling scripts.",
-            UnityCommand = "unity.editor.getCompilationStatus",
-            FormatResponse = result => {
-                if (result is null) return "Unable to get compilation status.";
+        if (response.Result is not { } result) return "Unable to get compilation status.";
 
-                var isCompiling = result.Value.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
-                var isUpdating = result.Value.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
+        var isCompiling = result.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
+        var isUpdating = result.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
 
-                if (isCompiling) return "Unity is currently compiling scripts...";
-                if (isUpdating) return "Unity is updating (importing assets, etc.)...";
-                return "Unity is idle (not compiling).";
-            },
-        },
+        if (isCompiling) return "Unity is currently compiling scripts...";
+        if (isUpdating) return "Unity is updating (importing assets, etc.)...";
+        return "Unity is idle (not compiling).";
+    }
 
-        new UnityTool {
-            Name = "get_play_mode_state",
-            Description = "Check if Unity Editor is in play mode, paused, or stopped.",
-            UnityCommand = "unity.editor.isPlaying",
-            FormatResponse = result => {
-                if (result is null) return "Unable to get play mode state.";
+    /// <summary>
+    /// Check if Unity Editor is in play mode, paused, or stopped.
+    /// </summary>
+    [McpServerTool(Name = "get_play_mode_state"), Description("Check if Unity Editor is in play mode, paused, or stopped.")]
+    public async Task<string> GetPlayModeState(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.isPlaying", null, ct);
+        EnsureSuccess(response);
 
-                var isPlaying = result.Value.TryGetProperty("isPlaying", out var p) && p.GetBoolean();
-                var isPaused = result.Value.TryGetProperty("isPaused", out var pa) && pa.GetBoolean();
+        if (response.Result is not { } result) return "Unable to get play mode state.";
 
-                if (!isPlaying) return "Unity is in Edit mode (not playing).";
-                if (isPaused) return "Unity is in Play mode (PAUSED).";
-                return "Unity is in Play mode (running).";
-            },
-        },
+        var isPlaying = result.TryGetProperty("isPlaying", out var p) && p.GetBoolean();
+        var isPaused = result.TryGetProperty("isPaused", out var pa) && pa.GetBoolean();
 
-        new UnityTool {
-            Name = "enter_play_mode",
-            Description = "Start Play mode in the Unity Editor to test the game.",
-            UnityCommand = "unity.editor.enterPlayMode",
-            FormatResponse = result => {
-                if (result is null) return "Failed to enter play mode.";
+        if (!isPlaying) return "Unity is in Edit mode (not playing).";
+        if (isPaused) return "Unity is in Play mode (PAUSED).";
+        return "Unity is in Play mode (running).";
+    }
 
-                var entered = result.Value.TryGetProperty("entered", out var e) && e.GetBoolean();
-                if (entered) return "Entered Play mode.";
+    /// <summary>
+    /// Start Play mode in the Unity Editor to test the game.
+    /// </summary>
+    [McpServerTool(Name = "enter_play_mode"), Description("Start Play mode in the Unity Editor to test the game.")]
+    public async Task<string> EnterPlayMode(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.enterPlayMode", null, ct);
+        EnsureSuccess(response);
 
-                var reason = result.Value.TryGetProperty("reason", out var r) ? r.GetString() : "Unknown reason";
-                return $"Could not enter Play mode: {reason}";
-            },
-        },
+        if (response.Result is not { } result) return "Failed to enter play mode.";
 
-        new UnityTool {
-            Name = "exit_play_mode",
-            Description = "Stop Play mode and return to Edit mode.",
-            UnityCommand = "unity.editor.exitPlayMode",
-            FormatResponse = result => {
-                if (result is null) return "Failed to exit play mode.";
+        var entered = result.TryGetProperty("entered", out var e) && e.GetBoolean();
+        if (entered) return "Entered Play mode.";
 
-                var exited = result.Value.TryGetProperty("exited", out var e) && e.GetBoolean();
-                if (exited) return "Exited Play mode.";
+        var reason = result.TryGetProperty("reason", out var r) ? r.GetString() : "Unknown reason";
+        return $"Could not enter Play mode: {reason}";
+    }
 
-                var reason = result.Value.TryGetProperty("reason", out var r) ? r.GetString() : "Unknown reason";
-                return $"Could not exit Play mode: {reason}";
-            },
-        },
+    /// <summary>
+    /// Stop Play mode and return to Edit mode.
+    /// </summary>
+    [McpServerTool(Name = "exit_play_mode"), Description("Stop Play mode and return to Edit mode.")]
+    public async Task<string> ExitPlayMode(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.exitPlayMode", null, ct);
+        EnsureSuccess(response);
 
-        new UnityTool {
-            Name = "pause_play_mode",
-            Description = "Pause the game while in Play mode.",
-            UnityCommand = "unity.editor.pausePlayMode",
-        },
+        if (response.Result is not { } result) return "Failed to exit play mode.";
 
-        new UnityTool {
-            Name = "resume_play_mode",
-            Description = "Resume the game after pausing in Play mode.",
-            UnityCommand = "unity.editor.resumePlayMode",
-        },
+        var exited = result.TryGetProperty("exited", out var e) && e.GetBoolean();
+        if (exited) return "Exited Play mode.";
 
-        new UnityTool {
-            Name = "get_open_scenes",
-            Description = "Get a list of currently open scenes in the Unity Editor.",
-            UnityCommand = "unity.editor.getOpenScenes",
-            FormatResponse = result => {
-                if (result is null) return "Unable to get open scenes.";
+        var reason = result.TryGetProperty("reason", out var r) ? r.GetString() : "Unknown reason";
+        return $"Could not exit Play mode: {reason}";
+    }
 
-                if (result.Value.TryGetProperty("scenes", out var scenes) && scenes.ValueKind == JsonValueKind.Array) {
-                    var sb = new System.Text.StringBuilder();
-                    sb.AppendLine("Open scenes:");
+    /// <summary>
+    /// Pause the game while in Play mode.
+    /// </summary>
+    [McpServerTool(Name = "pause_play_mode"), Description("Pause the game while in Play mode.")]
+    public async Task<string> PausePlayMode(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.pausePlayMode", null, ct);
+        EnsureSuccess(response);
+        return "Play mode paused.";
+    }
 
-                    foreach (var scene in scenes.EnumerateArray()) {
-                        var name = scene.TryGetProperty("name", out var n) ? n.GetString() : "Unknown";
-                        var path = scene.TryGetProperty("path", out var p) ? p.GetString() : "";
-                        var isDirty = scene.TryGetProperty("isDirty", out var d) && d.GetBoolean();
+    /// <summary>
+    /// Resume the game after pausing in Play mode.
+    /// </summary>
+    [McpServerTool(Name = "resume_play_mode"), Description("Resume the game after pausing in Play mode.")]
+    public async Task<string> ResumePlayMode(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.resumePlayMode", null, ct);
+        EnsureSuccess(response);
+        return "Play mode resumed.";
+    }
 
-                        sb.AppendLine($"  - {name}{(isDirty ? " (unsaved)" : "")}");
-                        if (!string.IsNullOrEmpty(path)) {
-                            sb.AppendLine($"    Path: {path}");
-                        }
-                    }
+    /// <summary>
+    /// Get a list of currently open scenes in the Unity Editor.
+    /// </summary>
+    [McpServerTool(Name = "get_open_scenes"), Description("Get a list of currently open scenes in the Unity Editor.")]
+    public async Task<string> GetOpenScenes(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.getOpenScenes", null, ct);
+        EnsureSuccess(response);
 
-                    return sb.ToString();
+        if (response.Result is not { } result) return "Unable to get open scenes.";
+
+        if (result.TryGetProperty("scenes", out var scenes) && scenes.ValueKind == JsonValueKind.Array) {
+            var sb = new StringBuilder();
+            sb.AppendLine("Open scenes:");
+
+            foreach (var scene in scenes.EnumerateArray()) {
+                var name = scene.TryGetProperty("name", out var n) ? n.GetString() : "Unknown";
+                var path = scene.TryGetProperty("path", out var p) ? p.GetString() : "";
+                var isDirty = scene.TryGetProperty("isDirty", out var d) && d.GetBoolean();
+
+                sb.AppendLine($"  - {name}{(isDirty ? " (unsaved)" : "")}");
+                if (!string.IsNullOrEmpty(path)) {
+                    sb.AppendLine($"    Path: {path}");
                 }
+            }
 
-                return "No scenes open.";
-            },
-        },
+            return sb.ToString();
+        }
 
-        new UnityTool {
-            Name = "save_all",
-            Description = "Save all open scenes and modified assets.",
-            UnityCommand = "unity.editor.saveAll",
-            FormatResponse = _ => "All scenes and assets saved.",
-        },
+        return "No scenes open.";
+    }
 
-        new UnityTool {
-            Name = "refresh_assets",
-            Description = "Refresh the Unity Asset Database to detect external file changes.",
-            UnityCommand = "unity.editor.refreshAssets",
-            FormatResponse = _ => "Asset database refreshed.",
-        },
-    ];
+    /// <summary>
+    /// Save all open scenes and modified assets.
+    /// </summary>
+    [McpServerTool(Name = "save_all"), Description("Save all open scenes and modified assets.")]
+    public async Task<string> SaveAll(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.saveAll", null, ct);
+        EnsureSuccess(response);
+        return "All scenes and assets saved.";
+    }
 
-    public static UnityTool? GetByName(string name) => All.Find(t => t.Name == name);
+    /// <summary>
+    /// Refresh the Unity Asset Database to detect external file changes.
+    /// </summary>
+    [McpServerTool(Name = "refresh_assets"), Description("Refresh the Unity Asset Database to detect external file changes.")]
+    public async Task<string> RefreshAssets(CancellationToken ct = default) {
+        await EnsureConnectedAsync(ct);
+        var response = await unityClient.SendAsync("unity.editor.refreshAssets", null, ct);
+        EnsureSuccess(response);
+        return "Asset database refreshed.";
+    }
+
+    // Helper methods
+    private async Task EnsureConnectedAsync(CancellationToken ct) {
+        if (unityClient.IsConnected) return;
+
+        try {
+            await unityClient.ConnectAsync(ct);
+        } catch (Exception ex) {
+            throw new InvalidOperationException(
+                $"Failed to connect to Unity Editor: {ex.Message}\n\nMake sure Unity Editor is running and the MCP plugin is active.",
+                ex
+            );
+        }
+    }
+
+    private static void EnsureSuccess(UnityResponse response) {
+        if (response.Success) return;
+
+        var errorText = response.Error is not null
+            ? $"Unity error [{response.Error.Code}]: {response.Error.Message}"
+            : "Unity command failed with unknown error";
+
+        throw new InvalidOperationException(errorText);
+    }
 }
