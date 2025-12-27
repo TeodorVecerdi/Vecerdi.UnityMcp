@@ -113,7 +113,6 @@ public static class McpErrorCodes {
     public const string CommandNotFound = "COMMAND_NOT_FOUND";
     public const string InvalidParams = "INVALID_PARAMS";
     public const string ExecutionFailed = "EXECUTION_FAILED";
-    public const string Timeout = "TIMEOUT";
     public const string NotSupported = "NOT_SUPPORTED";
     public const string MenuItemNotFound = "MENU_ITEM_NOT_FOUND";
 }
