@@ -133,7 +133,7 @@ public sealed class GetOpenScenesCommand : IMcpCommandHandler {
     public McpResponse Execute(McpRequest request) {
         var sceneCount = SceneManager.sceneCount;
         var scenes = Enumerable.Range(0, sceneCount)
-            .Select(i => SceneManager.GetSceneAt(i))
+            .Select(SceneManager.GetSceneAt)
             .Select(s => new {
                 name = s.name,
                 path = s.path,
@@ -192,7 +192,7 @@ public sealed class ExecuteMenuItemCommand : IMcpCommandHandler {
         var executed = EditorApplication.ExecuteMenuItem(menuItem);
 
         if (!executed) {
-            return McpResponse.Fail(request.Id, "MENU_ITEM_NOT_FOUND", $"Menu item not found or could not be executed: {menuItem}");
+            return McpResponse.Fail(request.Id, McpErrorCodes.MenuItemNotFound, $"Menu item not found or could not be executed: {menuItem}");
         }
 
         return McpResponse.Ok(request.Id, new { executed = true, menuItem });

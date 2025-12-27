@@ -115,4 +115,5 @@ public static class McpErrorCodes {
     public const string ExecutionFailed = "EXECUTION_FAILED";
     public const string Timeout = "TIMEOUT";
     public const string NotSupported = "NOT_SUPPORTED";
+    public const string MenuItemNotFound = "MENU_ITEM_NOT_FOUND";
 }
