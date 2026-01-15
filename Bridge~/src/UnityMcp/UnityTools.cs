@@ -78,7 +78,12 @@ public sealed class UnityTools(UnityClient unityClient) {
 
         // Step 1: Send recompile command (connection may drop due to domain reload)
         try {
-            await unityClient.SendAsync("unity.editor.recompile", null, ct);
+            var recompileResponse = await unityClient.SendAsync("unity.editor.recompile", null, ct);
+            
+            // Check if the command failed (e.g., Unity is in Play Mode)
+            if (!recompileResponse.Success && recompileResponse.Error is not null) {
+                return recompileResponse.Error.Message;
+            }
         } catch {
             // Expected - connection drops during domain reload
         }
