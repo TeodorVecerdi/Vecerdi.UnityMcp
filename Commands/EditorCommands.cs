@@ -14,6 +14,11 @@ public sealed class RecompileCommand : IMcpCommandHandler {
     public string Command => "unity.editor.recompile";
 
     public McpResponse Execute(McpRequest request) {
+        if (EditorApplication.isPlaying) {
+            return McpResponse.Fail(request.Id, McpErrorCodes.NotSupported,
+                "Cannot recompile: Unity is in Play Mode. Recompilation is disabled during play mode to prevent data loss.");
+        }
+
         CompilationPipeline.RequestScriptCompilation();
         return McpResponse.Ok(request.Id, new { requested = true });
     }
