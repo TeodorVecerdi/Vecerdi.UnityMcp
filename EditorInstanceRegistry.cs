@@ -61,8 +61,9 @@ public static class EditorInstanceRegistry {
     public static int RegisterInstance(ILogger? logger = null) {
         var instances = LoadInstances(logger);
 
-        // Clean up stale instances (processes that no longer exist)
-        instances = CleanupStaleInstances(instances, logger);
+        // Clean up stale instances (processes that no longer exist, or duplicate project paths)
+        var currentProjectPath = Application.dataPath.Replace("/Assets", "");
+        instances = CleanupStaleInstances(instances, currentProjectPath, logger);
 
         // Find an available port
         var usedPorts = instances.Select(i => i.Port).ToHashSet();
@@ -83,8 +84,8 @@ public static class EditorInstanceRegistry {
         // Register this instance
         var instance = new EditorInstance {
             Port = port,
-            ProjectPath = Application.dataPath.Replace("/Assets", ""),
-            ProjectName = Path.GetFileName(Application.dataPath.Replace("/Assets", "")),
+            ProjectPath = currentProjectPath,
+            ProjectName = Path.GetFileName(currentProjectPath),
             ProcessId = Process.GetCurrentProcess().Id,
             StartTime = DateTime.UtcNow,
         };
@@ -117,7 +118,7 @@ public static class EditorInstanceRegistry {
     /// </summary>
     public static List<EditorInstance> GetInstances(ILogger? logger = null) {
         var instances = LoadInstances(logger);
-        return CleanupStaleInstances(instances, logger);
+        return CleanupStaleInstances(instances, currentProjectPath: null, logger);
     }
 
     private static List<EditorInstance> LoadInstances(ILogger? logger) {
@@ -148,19 +149,27 @@ public static class EditorInstanceRegistry {
         }
     }
 
-    private static List<EditorInstance> CleanupStaleInstances(List<EditorInstance> instances, ILogger? logger) {
+    private static List<EditorInstance> CleanupStaleInstances(List<EditorInstance> instances, string? currentProjectPath, ILogger? logger) {
         var validInstances = new List<EditorInstance>();
 
         foreach (var instance in instances) {
-            try {
-                var process = Process.GetProcessById(instance.ProcessId);
-                // Process exists, keep it
-                validInstances.Add(instance);
-            } catch (ArgumentException) {
-                // Process doesn't exist, skip it
+            // Remove entries with the same project path as the current instance
+            // (Unity doesn't allow opening the same project twice, so this must be stale)
+            if (currentProjectPath != null && 
+                string.Equals(instance.ProjectPath, currentProjectPath, StringComparison.OrdinalIgnoreCase)) {
+                logger?.LogDebug("Removing stale instance on port {Port} (duplicate project path: {ProjectPath})",
+                    instance.Port, instance.ProjectPath);
+                continue;
+            }
+
+            // Check if the process still exists
+            if (!IsProcessRunning(instance.ProcessId)) {
                 logger?.LogDebug("Removing stale instance on port {Port} (PID: {ProcessId} no longer exists)",
                     instance.Port, instance.ProcessId);
+                continue;
             }
+
+            validInstances.Add(instance);
         }
 
         // Save if we removed any stale instances
@@ -169,6 +178,19 @@ public static class EditorInstanceRegistry {
         }
 
         return validInstances;
+    }
+
+    private static bool IsProcessRunning(int processId) {
+        try {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        } catch (ArgumentException) {
+            // Process doesn't exist
+            return false;
+        } catch (InvalidOperationException) {
+            // Process has exited
+            return false;
+        }
     }
 
     private static bool IsPortAvailable(int port) {
