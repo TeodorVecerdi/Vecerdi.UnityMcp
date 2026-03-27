@@ -88,15 +88,13 @@ Or if you've published it:
 | `unity_get_logs` | Get recent Unity console logs (errors, warnings, info) |
 | `unity_clear_logs` | Clear the log buffer |
 | `unity_recompile` | Force script recompilation |
-| `unity_get_compilation_status` | Check if Unity is compiling |
 | `unity_get_play_mode_state` | Check play mode state |
-| `unity_enter_play_mode` | Start play mode |
-| `unity_exit_play_mode` | Stop play mode |
-| `unity_pause_play_mode` | Pause the game |
-| `unity_resume_play_mode` | Resume the game |
-| `unity_get_open_scenes` | List open scenes |
-| `unity_save_all` | Save all scenes and assets |
+| `unity_set_play_mode` | Set play mode state (enter/exit via `isPlaying`) |
 | `unity_refresh_assets` | Refresh asset database |
+| `unity_invoke_managed_method` | Invoke managed methods via reflection with JSON arguments |
+| `unity_run_tests` | Run Unity tests with filter support and optional wait-for-completion |
+| `unity_get_test_run_status` | Get status/results of a test run |
+| `unity_cancel_test_run` | Cancel an active test run |
 
 ## Tool Parameters
 
@@ -110,20 +108,41 @@ Or if you've published it:
 }
 ```
 
+### `unity_invoke_managed_method`
+
+```json
+{
+  "typeName": "UnityEditor.EditorApplication",
+  "methodName": "ExecuteMenuItem",
+  "arguments": ["File/Save Project"],
+  "parameterTypeNames": ["System.String"]
+}
+```
+
+### `unity_run_tests`
+
+```json
+{
+  "testMode": "EditMode",
+  "assemblyNames": ["MediaVault.Tests"],
+  "categoryNames": ["Fast"],
+  "waitForCompletion": true
+}
+```
+
 ## Example Usage
 
 Once configured, an AI agent can:
 
 1. **Check for errors after making code changes:**
    - Call `unity_recompile`
-   - Wait a moment, then call `unity_get_compilation_status`
    - Call `unity_get_logs` with `minLevel: "error"` to see any compilation errors
 
 2. **Test runtime behavior:**
-   - Call `unity_enter_play_mode`
+   - Call `unity_set_play_mode` with `isPlaying: true`
    - Wait for initialization
    - Call `unity_get_logs` to see runtime errors
-   - Call `unity_exit_play_mode`
+   - Call `unity_set_play_mode` with `isPlaying: false`
 
 3. **Debug issues:**
    - Call `unity_get_logs` with a `filter` for the relevant component name
@@ -166,11 +185,11 @@ MediaVault/Assets/Scripts/UnityMcp.Editor/
 2. Logs from before the server started won't be available
 3. Try triggering an action that generates logs, then call `unity_get_logs`
 
-### Compilation status stuck
+### Compilation takes a long time
 
-If `unity_get_compilation_status` always shows compiling:
+If recompile appears stuck:
 1. Check Unity console for errors preventing compilation
-2. Try `unity_refresh_assets` to restart the import pipeline
+2. Try `unity_refresh_assets`, then run `unity_recompile` again
 
 ## Development
 
