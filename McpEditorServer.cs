@@ -88,14 +88,13 @@ public sealed class McpEditorServer {
         m_Commands.Register(new RecompileCommand());
         m_Commands.Register(new GetCompilationStatusCommand()); // Used internally by MCP recompile tool
         m_Commands.Register(new IsPlayingCommand());
-        m_Commands.Register(new EnterPlayModeCommand());
-        m_Commands.Register(new ExitPlayModeCommand());
-        m_Commands.Register(new PausePlayModeCommand());
-        m_Commands.Register(new ResumePlayModeCommand());
-        m_Commands.Register(new GetOpenScenesCommand());
-        m_Commands.Register(new SaveAllCommand());
+        m_Commands.Register(new SetPlayModeCommand());
         m_Commands.Register(new RefreshAssetsCommand());
         m_Commands.Register(new ExecuteMenuItemCommand());
+        m_Commands.Register(new InvokeManagedMethodCommand());
+        m_Commands.Register(new RunTestsCommand());
+        m_Commands.Register(new GetTestRunStatusCommand());
+        m_Commands.Register(new CancelTestRunCommand());
     }
 
     public void Start(int port = -1) {
@@ -200,13 +199,21 @@ public sealed class McpEditorServer {
                 // Queue for main thread processing
                 m_Server.QueueRequest(request, response => {
                     var json = JsonSerializer.Serialize(response, s_JsonOptions);
-                    Send(json);
+                    try {
+                        Send(json);
+                    } catch (InvalidOperationException ex) {
+                        m_Logger?.LogDebug(ex, "Skipping response send because socket is no longer open.");
+                    }
                 });
             } catch (JsonException ex) {
                 m_Logger?.LogWarning(ex, "Failed to parse MCP request");
                 var errorResponse = McpResponse.Fail("", McpErrorCodes.InvalidParams, $"Invalid JSON: {ex.Message}");
                 var json = JsonSerializer.Serialize(errorResponse, s_JsonOptions);
-                Send(json);
+                try {
+                    Send(json);
+                } catch (InvalidOperationException sendEx) {
+                    m_Logger?.LogDebug(sendEx, "Skipping parse error response send because socket is no longer open.");
+                }
             }
         }
 

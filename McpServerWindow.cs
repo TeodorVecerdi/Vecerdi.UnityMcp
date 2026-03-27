@@ -89,19 +89,16 @@ public sealed class McpServerWindow : EditorWindow {
             m_ScrollPosition = EditorGUILayout.BeginScrollView(m_ScrollPosition, GUILayout.Height(200));
 
             var commands = new[] {
-                ("unity.listCommands", "List all available commands"),
                 ("unity.debug.getLogs", "Get recent console logs (params: count, minLevel, filter)"),
                 ("unity.debug.clearLogs", "Clear the log buffer"),
                 ("unity.editor.recompile", "Force script recompilation"),
-                ("unity.editor.getCompilationStatus", "Check compilation state"),
                 ("unity.editor.isPlaying", "Check play mode state"),
-                ("unity.editor.enterPlayMode", "Enter play mode"),
-                ("unity.editor.exitPlayMode", "Exit play mode"),
-                ("unity.editor.pausePlayMode", "Pause play mode"),
-                ("unity.editor.resumePlayMode", "Resume play mode"),
-                ("unity.editor.getOpenScenes", "Get currently open scenes"),
-                ("unity.editor.saveAll", "Save all scenes and assets"),
+                ("unity.editor.setPlayMode", "Set play mode state (param: isPlaying bool)"),
                 ("unity.editor.refreshAssets", "Refresh asset database"),
+                ("unity.editor.runTests", "Run Unity tests (filter by mode, assembly, names, categories, groups)"),
+                ("unity.editor.getTestRunStatus", "Get test run status/results (params: runId optional)"),
+                ("unity.editor.cancelTestRun", "Cancel active test run (param: runId optional)"),
+                ("unity.managed.invokeMethod", "Invoke managed methods via reflection with JSON arguments"),
             };
 
             foreach (var (command, description) in commands) {
