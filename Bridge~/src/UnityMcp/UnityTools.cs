@@ -77,19 +77,17 @@ public sealed class UnityTools(UnityClient unityClient) {
     public async Task<CallToolResult> Recompile(CancellationToken ct = default) {
         if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
 
-        // Step 1: Send recompile command (connection may drop due to domain reload)
+        // Step 1: Trigger recompile (Unity side refreshes assets before requesting compilation).
         try {
             var recompileResponse = await unityClient.SendAsync("unity.editor.recompile", null, ct);
-            
-            // Check if the command failed (e.g., Unity is in Play Mode)
             if (!recompileResponse.Success && recompileResponse.Error is not null) {
                 return Error(recompileResponse.Error.Message);
             }
         } catch {
-            // Expected - connection drops during domain reload
+            // Expected - connection drops during domain reload.
         }
 
-        // Step 2: Wait for Unity to come back after domain reload
+        // Step 2: Wait for Unity to come back after domain reload.
         await Task.Delay(1000, ct);
 
         var reconnected = await unityClient.WaitForConnectionAsync(
@@ -102,7 +100,7 @@ public sealed class UnityTools(UnityClient unityClient) {
             return Error("Timed out waiting for Unity to reconnect after recompile. The Editor may still be compiling or may have encountered a fatal error.");
         }
 
-        // Step 3: Wait for compilation to complete
+        // Step 3: Wait for compilation to complete.
         await Task.Delay(500, ct);
 
         var compilationTimeout = DateTime.UtcNow + TimeSpan.FromSeconds(120);
@@ -122,7 +120,7 @@ public sealed class UnityTools(UnityClient unityClient) {
             await Task.Delay(1000, ct);
         }
 
-        // Step 4: Check for compilation errors
+        // Step 4: Check for compilation errors.
         try {
             var logsResponse = await unityClient.SendAsync("unity.debug.getLogs", new { count = 100, minLevel = "error" }, ct);
 
@@ -171,104 +169,33 @@ public sealed class UnityTools(UnityClient unityClient) {
     }
 
     /// <summary>
-    /// Start Play mode in the Unity Editor to test the game.
+    /// Set Unity play mode on or off.
     /// </summary>
-    [McpServerTool(Name = "enter_play_mode"), Description("Start Play mode in the Unity Editor to test the game.")]
-    public async Task<CallToolResult> EnterPlayMode(CancellationToken ct = default) {
+    [McpServerTool(Name = "set_play_mode"), Description("Set Unity play mode state. Pass isPlaying=true to enter Play mode or false to return to Edit mode.")]
+    public async Task<CallToolResult> SetPlayMode(
+        [Description("Desired play mode state. true enters Play mode, false exits to Edit mode.")] bool isPlaying,
+        CancellationToken ct = default
+    ) {
         if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.enterPlayMode", null, ct);
+
+        var response = await unityClient.SendAsync("unity.editor.setPlayMode", new { isPlaying }, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
-        if (response.Result is not { } result) return Error("Failed to enter play mode.");
-
-        var entered = result.TryGetProperty("entered", out var e) && e.GetBoolean();
-        if (entered) return Success("Entered Play mode.");
-
-        var reason = result.TryGetProperty("reason", out var r) ? r.GetString() : "Unknown reason";
-        return Error($"Could not enter Play mode: {reason}");
-    }
-
-    /// <summary>
-    /// Stop Play mode and return to Edit mode.
-    /// </summary>
-    [McpServerTool(Name = "exit_play_mode"), Description("Stop Play mode and return to Edit mode.")]
-    public async Task<CallToolResult> ExitPlayMode(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.exitPlayMode", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        if (response.Result is not { } result) return Error("Failed to exit play mode.");
-
-        var exited = result.TryGetProperty("exited", out var e) && e.GetBoolean();
-        if (exited) return Success("Exited Play mode.");
-
-        var reason = result.TryGetProperty("reason", out var r) ? r.GetString() : "Unknown reason";
-        return Error($"Could not exit Play mode: {reason}");
-    }
-
-    /// <summary>
-    /// Pause the game while in Play mode.
-    /// </summary>
-    [McpServerTool(Name = "pause_play_mode"), Description("Pause the game while in Play mode.")]
-    public async Task<CallToolResult> PausePlayMode(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.pausePlayMode", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-        return Success("Play mode paused.");
-    }
-
-    /// <summary>
-    /// Resume the game after pausing in Play mode.
-    /// </summary>
-    [McpServerTool(Name = "resume_play_mode"), Description("Resume the game after pausing in Play mode.")]
-    public async Task<CallToolResult> ResumePlayMode(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.resumePlayMode", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-        return Success("Play mode resumed.");
-    }
-
-    /// <summary>
-    /// Get a list of currently open scenes in the Unity Editor.
-    /// </summary>
-    [McpServerTool(Name = "get_open_scenes"), Description("Get a list of currently open scenes in the Unity Editor.")]
-    public async Task<CallToolResult> GetOpenScenes(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.getOpenScenes", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        if (response.Result is not { } result) return Error("Unable to get open scenes.");
-
-        if (result.TryGetProperty("scenes", out var scenes) && scenes.ValueKind == JsonValueKind.Array) {
-            var sb = new StringBuilder();
-            sb.AppendLine("Open scenes:");
-
-            foreach (var scene in scenes.EnumerateArray()) {
-                var name = scene.TryGetProperty("name", out var n) ? n.GetString() : "Unknown";
-                var path = scene.TryGetProperty("path", out var p) ? p.GetString() : "";
-                var isDirty = scene.TryGetProperty("isDirty", out var d) && d.GetBoolean();
-
-                sb.AppendLine($"  - {name}{(isDirty ? " (unsaved)" : "")}");
-                if (!string.IsNullOrEmpty(path)) {
-                    sb.AppendLine($"    Path: {path}");
-                }
-            }
-
-            return Success(sb.ToString());
+        if (response.Result is not { } result) {
+            return Error("Failed to set play mode.");
         }
 
-        return Success("No scenes open.");
-    }
+        var changed = result.TryGetProperty("changed", out var changedElement) && changedElement.GetBoolean();
+        var currentIsPlaying = result.TryGetProperty("isPlaying", out var playingElement)
+            ? playingElement.GetBoolean()
+            : isPlaying;
 
-    /// <summary>
-    /// Save all open scenes and modified assets.
-    /// </summary>
-    [McpServerTool(Name = "save_all"), Description("Save all open scenes and modified assets.")]
-    public async Task<CallToolResult> SaveAll(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.saveAll", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-        return Success("All scenes and assets saved.");
+        if (changed) {
+            return Success(currentIsPlaying ? "Entered Play mode." : "Exited Play mode.");
+        }
+
+        var reason = result.TryGetProperty("reason", out var reasonElement) ? reasonElement.GetString() : "No state change";
+        return Success($"Play mode unchanged: {reason}");
     }
 
     /// <summary>
@@ -294,6 +221,166 @@ public sealed class UnityTools(UnityClient unityClient) {
         var response = await unityClient.SendAsync("unity.editor.executeMenuItem", new { menuItem }, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
         return Success($"Executed menu item: {menuItem}");
+    }
+
+    /// <summary>
+    /// Invoke any managed method in the Unity process via reflection.
+    /// </summary>
+    [McpServerTool(Name = "invoke_managed_method"), Description("Invoke any managed method in the Unity process via reflection. Supports static/instance methods, overload disambiguation, generic args, and JSON arguments.")]
+    public async Task<CallToolResult> InvokeManagedMethod(
+        [Description("Fully-qualified type name (e.g., 'UnityEditor.EditorApplication')")] string typeName,
+        [Description("Method name to invoke")] string methodName,
+        [Description("Optional assembly short name if type resolution needs it")] string? assemblyName = null,
+        [Description("Optional list of parameter type names to disambiguate overloads")] string[]? parameterTypeNames = null,
+        [Description("Optional generic type argument names for generic methods")] string[]? genericTypeNames = null,
+        [Description("JSON-serializable argument list")] object[]? arguments = null,
+        [Description("Invoke as instance method instead of static")] bool invokeOnInstance = false,
+        [Description("Constructor arguments when invokeOnInstance=true")] object[]? constructorArguments = null,
+        [Description("Allow non-public members")] bool includeNonPublic = false,
+        CancellationToken ct = default
+    ) {
+        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+
+        var parameters = new Dictionary<string, object?> {
+            ["typeName"] = typeName,
+            ["methodName"] = methodName,
+            ["invokeOnInstance"] = invokeOnInstance,
+            ["includeNonPublic"] = includeNonPublic,
+            ["arguments"] = arguments ?? [],
+            ["constructorArguments"] = constructorArguments ?? [],
+        };
+
+        if (!string.IsNullOrWhiteSpace(assemblyName)) parameters["assemblyName"] = assemblyName;
+        if (parameterTypeNames is { Length: > 0 }) parameters["parameterTypeNames"] = parameterTypeNames;
+        if (genericTypeNames is { Length: > 0 }) parameters["genericTypeNames"] = genericTypeNames;
+
+        var response = await unityClient.SendAsync("unity.managed.invokeMethod", parameters, ct);
+        if (ToErrorResult(response) is { } errorResult) return errorResult;
+
+        if (response.Result is not { } result) {
+            return Success("Method invocation succeeded with no result payload.");
+        }
+
+        return Success(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    /// <summary>
+    /// Run Unity tests and optionally wait for completion.
+    /// </summary>
+    [McpServerTool(Name = "run_tests"), Description("Run Unity tests via TestRunner API. Supports filtering by mode, assemblies, test names, categories, and groups. Can wait for completion and return a summarized report.")]
+    public async Task<CallToolResult> RunTests(
+        [Description("Test mode: EditMode or PlayMode")] string testMode = "EditMode",
+        [Description("Filter by test assembly names (without .dll)")] string[]? assemblyNames = null,
+        [Description("Filter by full test names")] string[]? testNames = null,
+        [Description("Filter by NUnit category names")] string[]? categoryNames = null,
+        [Description("Filter by Unity test groups")] string[]? groupNames = null,
+        [Description("Optional Unity build target name")] string? targetPlatform = null,
+        [Description("Wait for completion before returning")] bool waitForCompletion = true,
+        [Description("Polling interval in milliseconds when waiting")] int pollIntervalMs = 1000,
+        [Description("Maximum wait time in seconds")] int timeoutSeconds = 300,
+        CancellationToken ct = default
+    ) {
+        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+
+        var parameters = new Dictionary<string, object?> {
+            ["testMode"] = testMode,
+        };
+
+        if (assemblyNames is { Length: > 0 }) parameters["assemblyNames"] = assemblyNames;
+        if (testNames is { Length: > 0 }) parameters["testNames"] = testNames;
+        if (categoryNames is { Length: > 0 }) parameters["categoryNames"] = categoryNames;
+        if (groupNames is { Length: > 0 }) parameters["groupNames"] = groupNames;
+        if (!string.IsNullOrWhiteSpace(targetPlatform)) parameters["targetPlatform"] = targetPlatform;
+
+        var startResponse = await unityClient.SendAsync("unity.editor.runTests", parameters, ct);
+        if (ToErrorResult(startResponse) is { } startError) return startError;
+
+        if (startResponse.Result is not { } startResult) {
+            return Error("Unity started test execution but did not return run metadata.");
+        }
+
+        var runId = startResult.TryGetProperty("runId", out var runIdElement) ? runIdElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(runId)) {
+            return Error("Unity started test execution but did not return a runId.");
+        }
+
+        if (!waitForCompletion) {
+            return Success($"Started Unity test run.\nrunId: {runId}");
+        }
+
+        var timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds));
+        var pollDelay = TimeSpan.FromMilliseconds(Math.Max(200, pollIntervalMs));
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested) {
+            await Task.Delay(pollDelay, ct);
+
+            var statusResponse = await unityClient.SendAsync("unity.editor.getTestRunStatus", new { runId }, ct);
+            if (ToErrorResult(statusResponse) is { } statusError) return statusError;
+
+            if (statusResponse.Result is not { } statusResult) {
+                continue;
+            }
+
+            var status = statusResult.TryGetProperty("status", out var statusElement)
+                ? statusElement.GetString()
+                : "unknown";
+
+            if (!string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)) {
+                return Success(FormatTestRunSummary(statusResult));
+            }
+        }
+
+        return Error($"Timed out waiting for test run completion.\nrunId: {runId}\nUse get_test_run_status to poll manually.");
+    }
+
+    /// <summary>
+    /// Get the status of a Unity test run.
+    /// </summary>
+    [McpServerTool(Name = "get_test_run_status"), Description("Get status and results for a Unity test run. If runId is omitted, returns the latest run.")]
+    public async Task<CallToolResult> GetTestRunStatus(
+        [Description("Optional run identifier returned by run_tests")] string? runId = null,
+        CancellationToken ct = default
+    ) {
+        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+
+        object? parameters = string.IsNullOrWhiteSpace(runId) ? null : new { runId };
+        var response = await unityClient.SendAsync("unity.editor.getTestRunStatus", parameters, ct);
+        if (ToErrorResult(response) is { } errorResult) return errorResult;
+
+        if (response.Result is not { } result) {
+            return Error("Unity returned no test run status payload.");
+        }
+
+        return Success(FormatTestRunSummary(result));
+    }
+
+    /// <summary>
+    /// Cancel an active Unity test run.
+    /// </summary>
+    [McpServerTool(Name = "cancel_test_run"), Description("Cancel an active Unity test run. If runId is omitted, cancels the currently running run.")]
+    public async Task<CallToolResult> CancelTestRun(
+        [Description("Optional run identifier returned by run_tests")] string? runId = null,
+        CancellationToken ct = default
+    ) {
+        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+
+        object? parameters = string.IsNullOrWhiteSpace(runId) ? null : new { runId };
+        var response = await unityClient.SendAsync("unity.editor.cancelTestRun", parameters, ct);
+        if (ToErrorResult(response) is { } errorResult) return errorResult;
+
+        var cancelledRunId = runId;
+        if (response.Result is { } result
+            && result.TryGetProperty("runId", out var resultRunIdElement)
+            && resultRunIdElement.ValueKind == JsonValueKind.String) {
+            cancelledRunId = resultRunIdElement.GetString();
+        }
+
+        if (string.IsNullOrWhiteSpace(cancelledRunId)) {
+            return Success("Requested test run cancellation.");
+        }
+
+        return Success($"Requested cancellation for test run {cancelledRunId}.");
     }
 
     /// <summary>
@@ -384,6 +471,82 @@ public sealed class UnityTools(UnityClient unityClient) {
             : "Unity command failed with unknown error";
 
         return Error(errorText);
+    }
+
+    private static string FormatTestRunSummary(JsonElement result) {
+        var runId = result.TryGetProperty("runId", out var runIdElement) ? runIdElement.GetString() : "<unknown>";
+        var status = result.TryGetProperty("status", out var statusElement) ? statusElement.GetString() : "unknown";
+
+        var discovered = 0;
+        var executed = 0;
+        var passed = 0;
+        var failed = 0;
+        var skipped = 0;
+        var inconclusive = 0;
+        var other = 0;
+
+        if (result.TryGetProperty("totals", out var totals) && totals.ValueKind == JsonValueKind.Object) {
+            discovered = ReadInt(totals, "discovered");
+            executed = ReadInt(totals, "executed");
+            passed = ReadInt(totals, "passed");
+            failed = ReadInt(totals, "failed");
+            skipped = ReadInt(totals, "skipped");
+            inconclusive = ReadInt(totals, "inconclusive");
+            other = ReadInt(totals, "other");
+        }
+
+        var sb = new StringBuilder();
+        var statusLabel = string.IsNullOrWhiteSpace(status)
+            ? "UNKNOWN"
+            : status.ToUpperInvariant();
+        var summaryLine = failed > 0
+            ? $"Unity tests {statusLabel}: {failed} failed, {passed} passed ({executed}/{discovered} executed)"
+            : $"Unity tests {statusLabel}: {passed} passed ({executed}/{discovered} executed)";
+
+        if (skipped > 0 || inconclusive > 0 || other > 0) {
+            summaryLine += $" | skipped {skipped}, inconclusive {inconclusive}, other {other}";
+        }
+
+        sb.AppendLine(summaryLine);
+        sb.AppendLine($"status: {status}");
+        sb.AppendLine($"discovered: {discovered}, executed: {executed}, passed: {passed}, failed: {failed}, skipped: {skipped}, inconclusive: {inconclusive}, other: {other}");
+        sb.AppendLine($"runId: {runId}");
+
+        if (result.TryGetProperty("message", out var messageElement)
+            && messageElement.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(messageElement.GetString())) {
+            sb.AppendLine();
+            sb.AppendLine($"message: {messageElement.GetString()}");
+        }
+
+        if (result.TryGetProperty("failures", out var failures) && failures.ValueKind == JsonValueKind.Array && failures.GetArrayLength() > 0) {
+            sb.AppendLine();
+            sb.AppendLine("failures:");
+
+            foreach (var failure in failures.EnumerateArray().Take(25)) {
+                var name = failure.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : "<unknown test>";
+                var message = failure.TryGetProperty("message", out var failureMessageElement) ? failureMessageElement.GetString() : null;
+                var stackTrace = failure.TryGetProperty("stackTrace", out var stackTraceElement) ? stackTraceElement.GetString() : null;
+
+                sb.AppendLine($"- {name}");
+                if (!string.IsNullOrWhiteSpace(message)) {
+                    sb.AppendLine($"  message:\n{message}");
+                    sb.AppendLine();
+                }
+
+                if (!string.IsNullOrWhiteSpace(stackTrace)) {
+                    sb.AppendLine($"  stack: {stackTrace}");
+                    sb.AppendLine();
+                }
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static int ReadInt(JsonElement element, string propertyName) {
+        if (!element.TryGetProperty(propertyName, out var value)) return 0;
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : 0;
     }
 
     private static CallToolResult Success(string message) => new() {
