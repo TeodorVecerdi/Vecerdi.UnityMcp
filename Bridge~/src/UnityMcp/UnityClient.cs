@@ -37,6 +37,7 @@ public sealed class UnityClient : IAsyncDisposable {
     private string m_Uri;
     private readonly TimeSpan m_Timeout;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<UnityResponse>> m_PendingRequests = new();
+    private readonly SemaphoreSlim m_LifecycleLock = new(1, 1);
     private readonly SemaphoreSlim m_SendLock = new(1, 1);
 
     private ClientWebSocket? m_WebSocket;
@@ -61,10 +62,15 @@ public sealed class UnityClient : IAsyncDisposable {
     /// Change the target URI and disconnect if currently connected.
     /// </summary>
     public async Task SetTargetAsync(string uri) {
-        if (m_Uri == uri) return;
+        await m_LifecycleLock.WaitAsync();
+        try {
+            if (m_Uri == uri) return;
 
-        await DisconnectAsync();
-        m_Uri = uri;
+            await DisconnectCoreAsync();
+            m_Uri = uri;
+        } finally {
+            m_LifecycleLock.Release();
+        }
     }
 
     /// <summary>
@@ -75,42 +81,44 @@ public sealed class UnityClient : IAsyncDisposable {
     }
 
     public async Task ConnectAsync(CancellationToken ct = default) {
-        if (IsConnected) return;
+        await m_LifecycleLock.WaitAsync(ct);
+        try {
+            if (m_WebSocket?.State == WebSocketState.Open) return;
 
-        m_WebSocket?.Dispose();
-        m_WebSocket = new ClientWebSocket();
+            await DisconnectCoreAsync();
 
-        await m_WebSocket.ConnectAsync(new Uri(m_Uri), ct);
+            ClientWebSocket? webSocket = null;
+            CancellationTokenSource? receiveCts = null;
 
-        m_ReceiveCts = new CancellationTokenSource();
-        m_ReceiveTask = ReceiveLoopAsync(m_ReceiveCts.Token);
+            try {
+                webSocket = new ClientWebSocket();
+                await webSocket.ConnectAsync(new Uri(m_Uri), ct);
+
+                receiveCts = new CancellationTokenSource();
+                var receiveTask = ReceiveLoopAsync(webSocket, receiveCts.Token);
+
+                m_WebSocket = webSocket;
+                m_ReceiveCts = receiveCts;
+                m_ReceiveTask = receiveTask;
+
+                webSocket = null;
+                receiveCts = null;
+            } finally {
+                webSocket?.Dispose();
+                receiveCts?.Dispose();
+            }
+        } finally {
+            m_LifecycleLock.Release();
+        }
     }
 
     public async Task DisconnectAsync() {
-        if (m_WebSocket is null) return;
-
-        m_ReceiveCts?.Cancel();
-
-        if (m_WebSocket.State == WebSocketState.Open) {
-            try {
-                await m_WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
-            } catch {
-                // Ignore close errors
-            }
+        await m_LifecycleLock.WaitAsync();
+        try {
+            await DisconnectCoreAsync();
+        } finally {
+            m_LifecycleLock.Release();
         }
-
-        if (m_ReceiveTask is not null) {
-            try {
-                await m_ReceiveTask;
-            } catch {
-                // Ignore receive loop errors
-            }
-        }
-
-        m_WebSocket.Dispose();
-        m_WebSocket = null;
-        m_ReceiveCts?.Dispose();
-        m_ReceiveCts = null;
     }
 
     /// <summary>
@@ -139,53 +147,59 @@ public sealed class UnityClient : IAsyncDisposable {
     }
 
     public async Task<UnityResponse> SendAsync(string command, object? parameters = null, CancellationToken ct = default) {
-        if (!IsConnected) {
-            throw new InvalidOperationException("Not connected to Unity. Call ConnectAsync first.");
-        }
-
-        var requestId = Interlocked.Increment(ref m_RequestId).ToString();
-        var request = new UnityRequest {
-            Id = requestId,
-            Command = command,
-            Params = parameters,
-        };
-
-        var tcs = new TaskCompletionSource<UnityResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        m_PendingRequests[requestId] = tcs;
-
+        await m_LifecycleLock.WaitAsync(ct);
         try {
-            var json = JsonSerializer.Serialize(request, s_JsonOptions);
-            var bytes = Encoding.UTF8.GetBytes(json);
+            var webSocket = m_WebSocket;
+            if (webSocket?.State != WebSocketState.Open) {
+                throw new InvalidOperationException("Not connected to Unity. Call ConnectAsync first.");
+            }
 
-            await m_SendLock.WaitAsync(ct);
+            var requestId = Interlocked.Increment(ref m_RequestId).ToString();
+            var request = new UnityRequest {
+                Id = requestId,
+                Command = command,
+                Params = parameters,
+            };
+
+            var tcs = new TaskCompletionSource<UnityResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            m_PendingRequests[requestId] = tcs;
+
             try {
-                await m_WebSocket!.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
+                var json = JsonSerializer.Serialize(request, s_JsonOptions);
+                var bytes = Encoding.UTF8.GetBytes(json);
+
+                await m_SendLock.WaitAsync(ct);
+                try {
+                    await webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
+                } finally {
+                    m_SendLock.Release();
+                }
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(m_Timeout);
+
+                var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, timeoutCts.Token));
+
+                if (completedTask != tcs.Task) {
+                    throw new TimeoutException($"Request '{command}' timed out after {m_Timeout.TotalSeconds}s");
+                }
+
+                return await tcs.Task;
             } finally {
-                m_SendLock.Release();
+                m_PendingRequests.TryRemove(requestId, out _);
             }
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(m_Timeout);
-
-            var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, timeoutCts.Token));
-
-            if (completedTask != tcs.Task) {
-                throw new TimeoutException($"Request '{command}' timed out after {m_Timeout.TotalSeconds}s");
-            }
-
-            return await tcs.Task;
         } finally {
-            m_PendingRequests.TryRemove(requestId, out _);
+            m_LifecycleLock.Release();
         }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken ct) {
+    private async Task ReceiveLoopAsync(ClientWebSocket webSocket, CancellationToken ct) {
         var buffer = new byte[8192];
         var messageBuilder = new StringBuilder();
 
-        while (!ct.IsCancellationRequested && m_WebSocket?.State == WebSocketState.Open) {
+        while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open) {
             try {
-                var result = await m_WebSocket.ReceiveAsync(buffer, ct);
+                var result = await webSocket.ReceiveAsync(buffer, ct);
 
                 if (result.MessageType == WebSocketMessageType.Close) {
                     break;
@@ -224,6 +238,40 @@ public sealed class UnityClient : IAsyncDisposable {
 
     public async ValueTask DisposeAsync() {
         await DisconnectAsync();
+        m_LifecycleLock.Dispose();
         m_SendLock.Dispose();
+    }
+
+    private async Task DisconnectCoreAsync() {
+        var webSocket = m_WebSocket;
+        var receiveCts = m_ReceiveCts;
+        var receiveTask = m_ReceiveTask;
+
+        m_WebSocket = null;
+        m_ReceiveCts = null;
+        m_ReceiveTask = null;
+
+        if (webSocket is null) return;
+
+        receiveCts?.Cancel();
+
+        try {
+            if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseReceived) {
+                await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
+            }
+        } catch {
+            // Ignore close errors
+        } finally {
+            if (receiveTask is not null) {
+                try {
+                    await receiveTask;
+                } catch {
+                    // Ignore receive loop errors
+                }
+            }
+
+            webSocket.Dispose();
+            receiveCts?.Dispose();
+        }
     }
 }

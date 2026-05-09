@@ -33,24 +33,29 @@ cd tools/unity-mcp
 dotnet build
 ```
 
-Or publish a self-contained executable:
+For Copilot CLI and other MCP clients, prefer publishing a stable executable and pointing the client at that binary:
 
 ```bash
 dotnet publish -c Release -o ./publish
 ```
 
+If you change code under `tools/unity-mcp`, rerun that publish command before expecting MCP clients to use the updated implementation.
+
+If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, stop the MCP client that is currently running the server, publish again, then restart the client.
+
 ## Configuration for AI Agents
 
 ### Claude Desktop / Cursor / etc.
 
-Add to your MCP configuration (e.g., `claude_desktop_config.json`):
+For local manual development you can use `dotnet run`, but for normal MCP client configuration prefer the published executable to avoid restore/build-on-start delays and file-locking issues.
+
+Published executable (recommended):
 
 ```json
 {
   "mcpServers": {
     "unity": {
-      "command": "dotnet",
-      "args": ["run", "--project", "D:/dev/unity/media-vault/tools/unity-mcp/UnityMcp.csproj"],
+      "command": "D:/dev/unity/media-vault/tools/unity-mcp/publish/unity-mcp.exe",
       "env": {
         "UNITY_MCP_LOG": "D:/dev/unity/media-vault/tools/unity-mcp/mcp.log"
       }
@@ -59,13 +64,14 @@ Add to your MCP configuration (e.g., `claude_desktop_config.json`):
 }
 ```
 
-Or if you've published it:
+`dotnet run` example for ad-hoc local use:
 
 ```json
 {
   "mcpServers": {
     "unity": {
-      "command": "D:/dev/unity/media-vault/tools/unity-mcp/publish/unity-mcp.exe",
+      "command": "dotnet",
+      "args": ["run", "--project", "D:/dev/unity/media-vault/tools/unity-mcp/UnityMcp.csproj"],
       "env": {
         "UNITY_MCP_LOG": "D:/dev/unity/media-vault/tools/unity-mcp/mcp.log"
       }

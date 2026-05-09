@@ -1,0 +1,24 @@
+# Unity MCP Agent Notes
+
+This directory inherits the repository-wide instructions from `D:\dev\unity\media-vault\AGENTS.md`.
+
+## Copilot CLI / MCP launch workflow
+
+- `D:\dev\unity\media-vault\.mcp.json` is expected to launch the published binary at `tools\unity-mcp\publish\unity-mcp.exe`.
+- Do **not** switch the MCP entry back to `dotnet run` unless the user explicitly asks for that behavior.
+
+## After changing code in this directory
+
+If you change files under `tools\unity-mcp\`, republish the MCP server before considering the change complete:
+
+```powershell
+dotnet publish .\tools\unity-mcp\UnityMcp.csproj -c Release -o .\tools\unity-mcp\publish -nologo
+```
+
+## Common publish failure
+
+If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, the running MCP client usually has the published server loaded already. In that case:
+
+1. Stop Copilot CLI or any other MCP client currently using `unity-mcp`.
+2. Run the publish command again.
+3. Restart the client so it picks up the new binary.
