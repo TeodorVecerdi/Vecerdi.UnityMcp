@@ -5,8 +5,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
-using UnityEngine;
 using Vecerdi.UnityMcp.Protocol;
+using Object = UnityEngine.Object;
 
 namespace Vecerdi.UnityMcp.Commands;
 
@@ -44,8 +44,8 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         }
 
         var bindingFlags = BindingFlags.FlattenHierarchy
-                           | (includeNonPublic ? BindingFlags.Public | BindingFlags.NonPublic : BindingFlags.Public)
-                           | (invokeOnInstance ? BindingFlags.Instance : BindingFlags.Static);
+                         | (includeNonPublic ? BindingFlags.Public | BindingFlags.NonPublic : BindingFlags.Public)
+                         | (invokeOnInstance ? BindingFlags.Instance : BindingFlags.Static);
 
         MethodInfo? resolvedMethod = null;
         object?[]? convertedArguments = null;
@@ -169,9 +169,8 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
     private static bool TryResolveType(string typeName, string? assemblyName, out Type type, out string? error) {
         if (!string.IsNullOrWhiteSpace(assemblyName)) {
             try {
-                var assembly = AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase))
-                    ?? Assembly.Load(assemblyName);
+                var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase))
+                            ?? Assembly.Load(assemblyName);
 
                 var explicitType = assembly.GetType(typeName, false, true);
                 if (explicitType is not null) {
@@ -358,8 +357,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             return false;
         }
 
-        var constructorFlags = BindingFlags.Instance
-                               | (includeNonPublic ? BindingFlags.Public | BindingFlags.NonPublic : BindingFlags.Public);
+        var constructorFlags = BindingFlags.Instance | (includeNonPublic ? BindingFlags.Public | BindingFlags.NonPublic : BindingFlags.Public);
         var constructors = targetType.GetConstructors(constructorFlags);
 
         if (constructors.Length == 0) {
@@ -426,13 +424,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
 
         var type = value.GetType();
 
-        if (type.IsPrimitive
-            || value is string
-            || value is decimal
-            || value is DateTime
-            || value is DateTimeOffset
-            || value is TimeSpan
-            || value is Guid) {
+        if (type.IsPrimitive || value is string || value is decimal || value is DateTime || value is DateTimeOffset || value is TimeSpan || value is Guid) {
             return value;
         }
 
@@ -440,7 +432,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             return value.ToString();
         }
 
-        if (value is UnityEngine.Object unityObject) {
+        if (value is Object unityObject) {
             return new {
                 type = type.FullName ?? type.Name,
                 name = unityObject.name,
