@@ -19,6 +19,7 @@ public sealed class UnityTools(UnityClient unityClient) {
         [Description("Maximum number of log entries to return (default: 100)")] int count = 100,
         [Description("Minimum log level to include: info, warning, or error")] string? minLevel = null,
         [Description("Filter logs containing this text (case-insensitive)")] string? filter = null,
+        [Description("Include stack traces for each log entry (very verbose; default: false)")] bool includeStackTraces = false,
         CancellationToken ct = default
     ) {
         if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
@@ -45,7 +46,8 @@ public sealed class UnityTools(UnityClient unityClient) {
                 var message = log.GetProperty("message").GetString() ?? "";
                 sb.AppendLine($"[{level}] {message}");
 
-                if (log.TryGetProperty("stackTrace", out var stackTrace) &&
+                if (includeStackTraces &&
+                    log.TryGetProperty("stackTrace", out var stackTrace) &&
                     stackTrace.ValueKind == JsonValueKind.String &&
                     !string.IsNullOrEmpty(stackTrace.GetString())) {
                     sb.AppendLine($"  Stack: {stackTrace.GetString()}");
