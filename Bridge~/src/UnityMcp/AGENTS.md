@@ -4,7 +4,7 @@ This directory inherits the repository-wide instructions from `D:\dev\unity\medi
 
 ## Copilot CLI / MCP launch workflow
 
-- `D:\dev\unity\media-vault\.mcp.json` is expected to launch the published binary at `tools\unity-mcp\publish\unity-mcp.exe`.
+- `D:\dev\unity\media-vault\.mcp.json` is expected to launch the published binary at `artifacts\publish\UnityMcp\release\unity-mcp.exe` (the default artifacts output layout; see the repo-root `tools\Directory.Build.props`).
 - Do **not** switch the MCP entry back to `dotnet run` unless the user explicitly asks for that behavior.
 
 ## After changing code in this directory
@@ -12,7 +12,7 @@ This directory inherits the repository-wide instructions from `D:\dev\unity\medi
 If you change files under `tools\unity-mcp\`, republish the MCP server before considering the change complete:
 
 ```powershell
-dotnet publish .\tools\unity-mcp\UnityMcp.csproj -c Release -o .\tools\unity-mcp\publish -nologo
+dotnet publish .\tools\unity-mcp\UnityMcp.csproj -c Release -nologo
 ```
 
 ## Common publish failure

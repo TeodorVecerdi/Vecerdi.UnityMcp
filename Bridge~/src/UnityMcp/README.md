@@ -33,10 +33,10 @@ cd tools/unity-mcp
 dotnet build
 ```
 
-For Copilot CLI and other MCP clients, prefer publishing a stable executable and pointing the client at that binary:
+For Copilot CLI and other MCP clients, prefer publishing a stable executable and pointing the client at that binary. Build output uses the artifacts output layout (see the repo-root `tools/Directory.Build.props`), so the published binary lands at `<repo>/artifacts/publish/UnityMcp/release/unity-mcp.exe`:
 
 ```bash
-dotnet publish -c Release -o ./publish
+dotnet publish -c Release
 ```
 
 If you change code under `tools/unity-mcp`, rerun that publish command before expecting MCP clients to use the updated implementation.
@@ -55,7 +55,7 @@ Published executable (recommended):
 {
   "mcpServers": {
     "unity": {
-      "command": "D:/dev/unity/media-vault/tools/unity-mcp/publish/unity-mcp.exe",
+      "command": "D:/dev/unity/media-vault/artifacts/publish/UnityMcp/release/unity-mcp.exe",
       "env": {
         "UNITY_MCP_LOG": "D:/dev/unity/media-vault/tools/unity-mcp/mcp.log"
       }
