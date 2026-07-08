@@ -104,10 +104,15 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         }
 
         if (resolvedMethod is null || convertedArguments is null) {
+            // Fold the candidate signatures into the message itself — clients that only surface the error text (not
+            // the structured data) still need to see the shapes the caller can actually target.
+            var overloads = string.Join(", ", candidateMethods.Select(DescribeMethod));
+            var baseMessage = resolutionError ?? $"Unable to resolve a matching overload for '{targetType.FullName}.{methodName}'.";
+
             return McpResponse.Fail(
                 request.Id,
                 McpErrorCodes.InvalidParams,
-                resolutionError ?? $"Unable to resolve a matching overload for '{targetType.FullName}.{methodName}'.",
+                $"{baseMessage} Available overload(s): {overloads}.",
                 new {
                     type = targetType.FullName,
                     method = methodName,
@@ -129,15 +134,23 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             var returnValue = AwaitIfTask(invocationResult, out var awaitedTask);
             var serializedValue = SerializeResult(returnValue);
 
-            return McpResponse.Ok(request.Id, new {
-                typeName = targetType.FullName ?? targetType.Name,
-                methodName = resolvedMethod.Name,
-                isStatic = resolvedMethod.IsStatic,
-                invokedOnInstance = invokeOnInstance,
-                awaitedTask,
-                returnType = resolvedMethod.ReturnType.FullName ?? resolvedMethod.ReturnType.Name,
-                returnValue = serializedValue,
-            });
+            // Keep the payload lean: the caller already knows the type/method/flags it requested, so echoing them
+            // back is noise. Surface only what interprets the result (its type) plus anything the caller couldn't
+            // predict — whether a Task was awaited, and which overload ran when the method name was ambiguous.
+            var payload = new Dictionary<string, object?> {
+                ["returnValue"] = serializedValue,
+                ["returnType"] = FriendlyTypeName(resolvedMethod.ReturnType),
+            };
+
+            if (awaitedTask) {
+                payload["awaitedTask"] = true;
+            }
+
+            if (candidateMethods.Count > 1) {
+                payload["resolvedOverload"] = DescribeMethod(resolvedMethod);
+            }
+
+            return McpResponse.Ok(request.Id, payload);
         } catch (TargetInvocationException ex) {
             var inner = ex.InnerException ?? ex;
             return McpResponse.Fail(
@@ -416,6 +429,44 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
 
         var resultProperty = taskType.GetProperty("Result", BindingFlags.Public | BindingFlags.Instance);
         return resultProperty?.GetValue(task);
+    }
+
+    /// <summary>
+    /// Renders a method as a compact, human-readable signature, e.g. <c>FloatSeeded(Int64)</c> or
+    /// <c>Element&lt;String&gt;(String, String)</c>. Used to disambiguate overloads in responses.
+    /// </summary>
+    private static string DescribeMethod(MethodInfo method) {
+        var parameters = string.Join(", ", method.GetParameters().Select(p => FriendlyTypeName(p.ParameterType)));
+
+        if (!method.IsGenericMethod) {
+            return $"{method.Name}({parameters})";
+        }
+
+        var genericArgs = string.Join(", ", method.GetGenericArguments().Select(FriendlyTypeName));
+        return $"{method.Name}<{genericArgs}>({parameters})";
+    }
+
+    /// <summary>
+    /// Short, readable type name — unwraps <see cref="Nullable{T}"/> and renders generics as
+    /// <c>List&lt;Int32&gt;</c> rather than the mangled reflection form.
+    /// </summary>
+    private static string FriendlyTypeName(Type type) {
+        if (Nullable.GetUnderlyingType(type) is { } underlying) {
+            return FriendlyTypeName(underlying) + "?";
+        }
+
+        if (!type.IsGenericType) {
+            return type.Name;
+        }
+
+        var name = type.Name;
+        var tick = name.IndexOf('`');
+        if (tick >= 0) {
+            name = name[..tick];
+        }
+
+        var args = string.Join(", ", type.GetGenericArguments().Select(FriendlyTypeName));
+        return $"{name}<{args}>";
     }
 
     private static object? SerializeResult(object? value, int depth = 0) {
