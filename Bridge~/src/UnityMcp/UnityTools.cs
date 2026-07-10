@@ -10,7 +10,12 @@ namespace UnityMcp;
 /// MCP tools for interacting with Unity Editor.
 /// </summary>
 [McpServerToolType]
-public sealed class UnityTools(UnityClient unityClient) {
+public sealed class UnityTools(UnityConnectionPool pool) {
+    private const string PortParamDescription =
+        "Optional Unity Editor port to target. Omit to use the default editor selected via 'select_editor', " +
+        "or the only running editor when exactly one is available. Required when multiple editors are running " +
+        "and no default has been selected. Use 'list_editors' to see available ports.";
+
     /// <summary>
     /// Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.
     /// </summary>
@@ -20,15 +25,17 @@ public sealed class UnityTools(UnityClient unityClient) {
         [Description("Minimum log level to include: info, warning, or error")] string? minLevel = null,
         [Description("Filter logs containing this text (case-insensitive)")] string? filter = null,
         [Description("Include stack traces for each log entry (very verbose; default: false)")] bool includeStackTraces = false,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
         var parameters = new Dictionary<string, object?> { ["count"] = count };
         if (minLevel is not null) parameters["minLevel"] = minLevel;
         if (filter is not null) parameters["filter"] = filter;
 
-        var response = await unityClient.SendAsync("unity.debug.getLogs", parameters, ct);
+        var response = await unity!.SendAsync("unity.debug.getLogs", parameters, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         if (response.Result is not { } result) return Success("No logs available.");
@@ -64,9 +71,13 @@ public sealed class UnityTools(UnityClient unityClient) {
     /// Clear the Unity console log buffer.
     /// </summary>
     [McpServerTool(Name = "clear_logs"), Description("Clear the Unity console log buffer.")]
-    public async Task<CallToolResult> ClearLogs(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.debug.clearLogs", null, ct);
+    public async Task<CallToolResult> ClearLogs(
+        [Description(PortParamDescription)] int? port = null,
+        CancellationToken ct = default
+    ) {
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
+        var response = await unity!.SendAsync("unity.debug.clearLogs", null, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
         return Success("Log buffer cleared.");
     }
@@ -76,12 +87,16 @@ public sealed class UnityTools(UnityClient unityClient) {
     /// compilation to complete and returns any errors.
     /// </summary>
     [McpServerTool(Name = "recompile"), Description("Force Unity to recompile all scripts. Use this after making code changes to verify they compile. This is a blocking call that waits for compilation to complete and returns any errors.")]
-    public async Task<CallToolResult> Recompile(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+    public async Task<CallToolResult> Recompile(
+        [Description(PortParamDescription)] int? port = null,
+        CancellationToken ct = default
+    ) {
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
         // Step 1: Trigger recompile (Unity side refreshes assets before requesting compilation).
         try {
-            var recompileResponse = await unityClient.SendAsync("unity.editor.recompile", null, ct);
+            var recompileResponse = await unity!.SendAsync("unity.editor.recompile", null, ct);
             if (!recompileResponse.Success && recompileResponse.Error is not null) {
                 return Error(recompileResponse.Error.Message);
             }
@@ -92,7 +107,7 @@ public sealed class UnityTools(UnityClient unityClient) {
         // Step 2: Wait for Unity to come back after domain reload.
         await Task.Delay(1000, ct);
 
-        var reconnected = await unityClient.WaitForConnectionAsync(
+        var reconnected = await unity!.WaitForConnectionAsync(
             timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             ct
@@ -108,7 +123,7 @@ public sealed class UnityTools(UnityClient unityClient) {
         var compilationTimeout = DateTime.UtcNow + TimeSpan.FromSeconds(120);
         while (DateTime.UtcNow < compilationTimeout && !ct.IsCancellationRequested) {
             try {
-                var statusResponse = await unityClient.SendAsync("unity.editor.getCompilationStatus", null, ct);
+                var statusResponse = await unity!.SendAsync("unity.editor.getCompilationStatus", null, ct);
                 if (statusResponse is { Success: true, Result: not null }) {
                     var isCompiling = statusResponse.Result.Value.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
                     var isUpdating = statusResponse.Result.Value.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
@@ -116,7 +131,7 @@ public sealed class UnityTools(UnityClient unityClient) {
                     if (!isCompiling && !isUpdating) break;
                 }
             } catch {
-                await unityClient.WaitForConnectionAsync(TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(500), ct);
+                await unity!.WaitForConnectionAsync(TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(500), ct);
             }
 
             await Task.Delay(1000, ct);
@@ -124,7 +139,7 @@ public sealed class UnityTools(UnityClient unityClient) {
 
         // Step 4: Check for compilation errors.
         try {
-            var logsResponse = await unityClient.SendAsync("unity.debug.getLogs", new { count = 100, minLevel = "error" }, ct);
+            var logsResponse = await unity!.SendAsync("unity.debug.getLogs", new { count = 100, minLevel = "error" }, ct);
 
             if (logsResponse is { Success: true, Result: not null } && logsResponse.Result.Value.TryGetProperty("logs", out var logs) && logs.ValueKind == JsonValueKind.Array && logs.GetArrayLength() > 0) {
                 var sb = new StringBuilder();
@@ -155,9 +170,13 @@ public sealed class UnityTools(UnityClient unityClient) {
     /// Check if Unity Editor is in play mode, paused, or stopped.
     /// </summary>
     [McpServerTool(Name = "get_play_mode_state"), Description("Check if Unity Editor is in play mode, paused, or stopped.")]
-    public async Task<CallToolResult> GetPlayModeState(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.isPlaying", null, ct);
+    public async Task<CallToolResult> GetPlayModeState(
+        [Description(PortParamDescription)] int? port = null,
+        CancellationToken ct = default
+    ) {
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
+        var response = await unity!.SendAsync("unity.editor.isPlaying", null, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         if (response.Result is not { } result) return Error("Unable to get play mode state.");
@@ -176,11 +195,13 @@ public sealed class UnityTools(UnityClient unityClient) {
     [McpServerTool(Name = "set_play_mode"), Description("Set Unity play mode state. Pass isPlaying=true to enter Play mode or false to return to Edit mode.")]
     public async Task<CallToolResult> SetPlayMode(
         [Description("Desired play mode state. true enters Play mode, false exits to Edit mode.")] bool isPlaying,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
-        var response = await unityClient.SendAsync("unity.editor.setPlayMode", new { isPlaying }, ct);
+        var response = await unity!.SendAsync("unity.editor.setPlayMode", new { isPlaying }, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         if (response.Result is not { } result) {
@@ -204,9 +225,13 @@ public sealed class UnityTools(UnityClient unityClient) {
     /// Refresh the Unity Asset Database to detect external file changes.
     /// </summary>
     [McpServerTool(Name = "refresh_assets"), Description("Refresh the Unity Asset Database to detect external file changes.")]
-    public async Task<CallToolResult> RefreshAssets(CancellationToken ct = default) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.refreshAssets", null, ct);
+    public async Task<CallToolResult> RefreshAssets(
+        [Description(PortParamDescription)] int? port = null,
+        CancellationToken ct = default
+    ) {
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
+        var response = await unity!.SendAsync("unity.editor.refreshAssets", null, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
         return Success("Asset database refreshed.");
     }
@@ -217,10 +242,12 @@ public sealed class UnityTools(UnityClient unityClient) {
     [McpServerTool(Name = "execute_menu_item"), Description("Execute a Unity Editor menu item by its path (e.g., 'File/Save Project', 'Edit/Project Settings...', 'Window/General/Console').")]
     public async Task<CallToolResult> ExecuteMenuItem(
         [Description("The menu item path to execute (e.g., 'File/Save Project')")] string menuItem,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
-        var response = await unityClient.SendAsync("unity.editor.executeMenuItem", new { menuItem }, ct);
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
+        var response = await unity!.SendAsync("unity.editor.executeMenuItem", new { menuItem }, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
         return Success($"Executed menu item: {menuItem}");
     }
@@ -239,9 +266,11 @@ public sealed class UnityTools(UnityClient unityClient) {
         [Description("Invoke as instance method instead of static")] bool invokeOnInstance = false,
         [Description("Constructor arguments when invokeOnInstance=true")] object[]? constructorArguments = null,
         [Description("Allow non-public members")] bool includeNonPublic = false,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
         var parameters = new Dictionary<string, object?> {
             ["typeName"] = typeName,
@@ -256,7 +285,7 @@ public sealed class UnityTools(UnityClient unityClient) {
         if (parameterTypeNames is { Length: > 0 }) parameters["parameterTypeNames"] = parameterTypeNames;
         if (genericTypeNames is { Length: > 0 }) parameters["genericTypeNames"] = genericTypeNames;
 
-        var response = await unityClient.SendAsync("unity.managed.invokeMethod", parameters, ct);
+        var response = await unity!.SendAsync("unity.managed.invokeMethod", parameters, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         if (response.Result is not { } result) {
@@ -280,9 +309,11 @@ public sealed class UnityTools(UnityClient unityClient) {
         [Description("Wait for completion before returning")] bool waitForCompletion = true,
         [Description("Polling interval in milliseconds when waiting")] int pollIntervalMs = 1000,
         [Description("Maximum wait time in seconds")] int timeoutSeconds = 300,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
         var parameters = new Dictionary<string, object?> {
             ["testMode"] = testMode,
@@ -294,7 +325,7 @@ public sealed class UnityTools(UnityClient unityClient) {
         if (groupNames is { Length: > 0 }) parameters["groupNames"] = groupNames;
         if (!string.IsNullOrWhiteSpace(targetPlatform)) parameters["targetPlatform"] = targetPlatform;
 
-        var startResponse = await unityClient.SendAsync("unity.editor.runTests", parameters, ct);
+        var startResponse = await unity!.SendAsync("unity.editor.runTests", parameters, ct);
         if (ToErrorResult(startResponse) is { } startError) return startError;
 
         if (startResponse.Result is not { } startResult) {
@@ -317,7 +348,7 @@ public sealed class UnityTools(UnityClient unityClient) {
         while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested) {
             await Task.Delay(pollDelay, ct);
 
-            var statusResponse = await unityClient.SendAsync("unity.editor.getTestRunStatus", new { runId }, ct);
+            var statusResponse = await unity!.SendAsync("unity.editor.getTestRunStatus", new { runId }, ct);
             if (ToErrorResult(statusResponse) is { } statusError) return statusError;
 
             if (statusResponse.Result is not { } statusResult) {
@@ -342,12 +373,14 @@ public sealed class UnityTools(UnityClient unityClient) {
     [McpServerTool(Name = "get_test_run_status"), Description("Get status and results for a Unity test run. If runId is omitted, returns the latest run.")]
     public async Task<CallToolResult> GetTestRunStatus(
         [Description("Optional run identifier returned by run_tests")] string? runId = null,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
         object? parameters = string.IsNullOrWhiteSpace(runId) ? null : new { runId };
-        var response = await unityClient.SendAsync("unity.editor.getTestRunStatus", parameters, ct);
+        var response = await unity!.SendAsync("unity.editor.getTestRunStatus", parameters, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         if (response.Result is not { } result) {
@@ -363,12 +396,14 @@ public sealed class UnityTools(UnityClient unityClient) {
     [McpServerTool(Name = "cancel_test_run"), Description("Cancel an active Unity test run. If runId is omitted, cancels the currently running run.")]
     public async Task<CallToolResult> CancelTestRun(
         [Description("Optional run identifier returned by run_tests")] string? runId = null,
+        [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        if (await EnsureConnectedAsync(ct) is { } connectionError) return connectionError;
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
 
         object? parameters = string.IsNullOrWhiteSpace(runId) ? null : new { runId };
-        var response = await unityClient.SendAsync("unity.editor.cancelTestRun", parameters, ct);
+        var response = await unity!.SendAsync("unity.editor.cancelTestRun", parameters, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         var cancelledRunId = runId;
@@ -388,7 +423,7 @@ public sealed class UnityTools(UnityClient unityClient) {
     /// <summary>
     /// List all available Unity Editor instances.
     /// </summary>
-    [McpServerTool(Name = "list_editors"), Description("List all available Unity Editor instances that can be controlled via MCP.")]
+    [McpServerTool(Name = "list_editors"), Description("List all available Unity Editor instances that can be controlled via MCP. Each editor has its own pooled connection; pass a tool's 'port' parameter to target a specific one. Markers show which editors currently have a live pooled connection and which is the default target.")]
     public CallToolResult ListEditors() {
         var editors = EditorDiscovery.GetAvailableEditors();
 
@@ -400,12 +435,13 @@ public sealed class UnityTools(UnityClient unityClient) {
         sb.AppendLine($"Found {editors.Count} Unity Editor instance(s):");
         sb.AppendLine();
 
-        var currentUri = unityClient.CurrentUri;
+        var defaultPort = pool.DefaultPort;
 
         foreach (var editor in editors) {
-            var uri = EditorDiscovery.GetEditorUri(editor);
-            var isConnected = uri == currentUri && unityClient.IsConnected;
-            var marker = isConnected ? " [CONNECTED]" : "";
+            var markers = new List<string>();
+            if (pool.IsConnected(editor.Port)) markers.Add("CONNECTED");
+            if (editor.Port == defaultPort) markers.Add("DEFAULT");
+            var marker = markers.Count > 0 ? $" [{string.Join(", ", markers)}]" : "";
 
             sb.AppendLine($"  Port {editor.Port}:{marker}");
             sb.AppendLine($"    Project: {editor.ProjectName}");
@@ -420,9 +456,9 @@ public sealed class UnityTools(UnityClient unityClient) {
     /// <summary>
     /// Select which Unity Editor instance to control.
     /// </summary>
-    [McpServerTool(Name = "select_editor"), Description("Select which Unity Editor instance to control. Use 'list_editors' first to see available instances.")]
+    [McpServerTool(Name = "select_editor"), Description("Set the default Unity Editor that tool calls target when they omit a 'port'. Use 'list_editors' first to see available instances. This only changes the default and warms that editor's pooled connection; it does not disconnect any other editor, so other consumers of this bridge are unaffected. You can still target any editor per call via the tool's 'port' parameter.")]
     public async Task<CallToolResult> SelectEditor(
-        [Description("The port number of the Unity Editor instance to connect to")] int port,
+        [Description("The port number of the Unity Editor instance to make the default target")] int port,
         CancellationToken ct = default
     ) {
         var editor = EditorDiscovery.FindEditorByPort(port);
@@ -431,37 +467,38 @@ public sealed class UnityTools(UnityClient unityClient) {
             return Error($"No Unity Editor found on port {port}. Use 'list_editors' to see available instances.");
         }
 
-        await unityClient.SetTargetAsync(editor);
+        // Set the default first so the selection sticks even if warming the connection fails.
+        pool.DefaultPort = port;
 
         try {
-            await unityClient.ConnectAsync(ct);
-            return Success($"Connected to Unity Editor: {editor.ProjectName} (port {port})");
+            await pool.AcquireAsync(port, ct);
+            return Success($"Selected Unity Editor: {editor.ProjectName} (port {port}). It is now the default target for tool calls that omit a 'port'. Other pooled editor connections are unaffected.");
         } catch (Exception ex) {
-            return Error($"Found editor on port {port} but failed to connect: {ex.Message}");
+            return Error($"Selected editor on port {port} as the default, but failed to connect: {ex.Message}");
         }
     }
 
     // Helper methods
-    private async Task<CallToolResult?> EnsureConnectedAsync(CancellationToken ct) {
-        if (unityClient.IsConnected) return null;
 
-        // Auto-discover and connect if there's exactly one editor available
-        var editors = EditorDiscovery.GetAvailableEditors();
-        if (editors.Count == 1) {
-            await unityClient.SetTargetAsync(editors[0]);
-        } else if (editors.Count > 1) {
-            return Error($"Multiple Unity Editors found ({editors.Count}). Use 'list_editors' to see them and 'select_editor' to choose one.");
+    /// <summary>
+    /// Resolve which editor a call targets (explicit port -> default selection -> the only running
+    /// editor) and return an open pooled connection to it. Each editor has its own pooled connection,
+    /// so resolving one never disturbs the connections other consumers are using.
+    /// </summary>
+    private async Task<(IUnityConnection? Connection, CallToolResult? Error)> ResolveConnectionAsync(int? port, CancellationToken ct) {
+        var resolution = PortResolver.Resolve(port, pool.DefaultPort, EditorDiscovery.GetAvailableEditors());
+        if (resolution.Error is { } resolveError) {
+            return (null, Error(resolveError));
         }
 
+        var targetPort = resolution.Port!.Value;
         try {
-            await unityClient.ConnectAsync(ct);
-            return null;
+            var connection = await pool.AcquireAsync(targetPort, ct);
+            return (connection, null);
         } catch (Exception ex) {
-            var hint = editors.Count == 0
-                ? "Make sure Unity Editor is running and the MCP plugin is active."
-                : $"Found {editors.Count} editor(s) but failed to connect.";
-
-            return Error($"Failed to connect to Unity Editor: {ex.Message}\n\n{hint}");
+            return (null, Error(
+                $"Failed to connect to Unity Editor on port {targetPort}: {ex.Message}\n\n" +
+                "Make sure the Editor is running and the MCP plugin is active."));
         }
     }
 
