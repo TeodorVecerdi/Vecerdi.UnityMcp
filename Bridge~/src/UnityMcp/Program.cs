@@ -21,9 +21,9 @@ var logLevel = Environment.GetEnvironmentVariable("UNITY_MCP_LOG_LEVEL") switch 
 };
 builder.Logging.SetMinimumLevel(logLevel);
 
-// Register Unity client as singleton
-var unityUri = Environment.GetEnvironmentVariable("UNITY_MCP_URI") ?? "ws://localhost:9999/";
-builder.Services.AddSingleton(new UnityClient(unityUri));
+// Register the connection pool as a singleton. It lazily opens one connection per editor
+// port, so multiple concurrent consumers of this bridge can each target a different editor.
+builder.Services.AddSingleton(new UnityConnectionPool());
 
 // Register MCP server with stdio transport and tools from this assembly
 builder.Services

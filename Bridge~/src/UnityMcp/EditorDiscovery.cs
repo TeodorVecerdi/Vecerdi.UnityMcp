@@ -78,7 +78,14 @@ public static class EditorDiscovery {
     /// Gets the URI for a specific editor instance.
     /// </summary>
     public static string GetEditorUri(EditorInstance instance) {
-        return $"ws://localhost:{instance.Port}/";
+        return GetEditorUri(instance.Port);
+    }
+
+    /// <summary>
+    /// Gets the URI for an editor on a specific port.
+    /// </summary>
+    public static string GetEditorUri(int port) {
+        return $"ws://localhost:{port}/";
     }
 
     /// <summary>

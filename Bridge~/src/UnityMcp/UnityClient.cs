@@ -33,8 +33,8 @@ public sealed class UnityError {
 /// <summary>
 /// WebSocket client for communicating with Unity Editor's MCP plugin.
 /// </summary>
-public sealed class UnityClient : IAsyncDisposable {
-    private string m_Uri;
+public sealed class UnityClient : IUnityConnection {
+    private readonly string m_Uri;
     private readonly TimeSpan m_Timeout;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<UnityResponse>> m_PendingRequests = new();
     private readonly SemaphoreSlim m_LifecycleLock = new(1, 1);
@@ -56,28 +56,6 @@ public sealed class UnityClient : IAsyncDisposable {
     public UnityClient(string? uri = null, TimeSpan? timeout = null) {
         m_Uri = uri ?? EditorDiscovery.GetDefaultEditorUri();
         m_Timeout = timeout ?? TimeSpan.FromSeconds(30);
-    }
-
-    /// <summary>
-    /// Change the target URI and disconnect if currently connected.
-    /// </summary>
-    public async Task SetTargetAsync(string uri) {
-        await m_LifecycleLock.WaitAsync();
-        try {
-            if (m_Uri == uri) return;
-
-            await DisconnectCoreAsync();
-            m_Uri = uri;
-        } finally {
-            m_LifecycleLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Change the target to a specific editor instance.
-    /// </summary>
-    public async Task SetTargetAsync(EditorInstance instance) {
-        await SetTargetAsync(EditorDiscovery.GetEditorUri(instance));
     }
 
     public async Task ConnectAsync(CancellationToken ct = default) {
