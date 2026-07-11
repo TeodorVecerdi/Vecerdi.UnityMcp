@@ -91,16 +91,41 @@ Published executable (recommended):
 
 | Tool | Description |
 |------|-------------|
-| `unity_get_logs` | Get recent Unity console logs (errors, warnings, info) |
-| `unity_clear_logs` | Clear the log buffer |
-| `unity_recompile` | Force script recompilation |
-| `unity_get_play_mode_state` | Check play mode state |
-| `unity_set_play_mode` | Set play mode state (enter/exit via `isPlaying`) |
-| `unity_refresh_assets` | Refresh asset database |
-| `unity_invoke_managed_method` | Invoke managed methods via reflection with JSON arguments |
-| `unity_run_tests` | Run Unity tests with filter support and optional wait-for-completion |
-| `unity_get_test_run_status` | Get status/results of a test run |
-| `unity_cancel_test_run` | Cancel an active test run |
+| `sync_and_compile` | **Default "make my edits take effect" call.** Refresh + recompile + wait + fresh diagnostics, as one operation |
+| `get_logs` | Get recent Unity console logs (with timestamps + buffer-wrap note) |
+| `clear_logs` | Clear the log buffer |
+| `recompile` | Force script recompilation (equivalent to `sync_and_compile`; kept for compatibility) |
+| `get_play_mode_state` | Check play mode state |
+| `set_play_mode` | Set play mode state (enter/exit via `isPlaying`) |
+| `refresh_assets` | Refresh asset database; reports whether a compile was triggered |
+| `invoke_managed_method` | Invoke managed methods via reflection with JSON arguments |
+| `run_tests` | Run Unity tests with filter support and optional wait-for-completion |
+| `get_test_run_status` | Get status/results of a test run |
+| `cancel_test_run` | Cancel an active test run |
+| `list_editors` / `select_editor` | Discover editors and set the default target |
+
+### Key semantics
+
+- **Making edits take effect:** call `sync_and_compile`. It drains any in-flight
+  import/compile, refreshes assets, forces a recompile, waits out the domain
+  reload, and returns **only** the compiler diagnostics from that compile (parsed
+  into `file(line,col): severity CODE: message`). Do **not** chain
+  `refresh_assets` then `recompile` - that race is the footgun this tool removes.
+- **Domain-reload contract:** `sync_and_compile`/`recompile` block (up to ~3 min)
+  and drive a domain reload; any *other* call to the same editor mid-reload fails
+  with a connect error. Expect it, and retry after the call returns.
+- **Auto-connect:** a tool call with no `port` attaches to the `select_editor`
+  default, or to the only running editor when exactly one exists.
+- **Per-editor state:** the default target and the "latest" test run are tracked
+  per editor, and the latest run is undefined across a domain reload - pass the
+  `runId` from `run_tests` to be safe.
+- **Main-thread execution:** the editor processes ~10 queued commands per frame
+  on the main thread, so a slow `invoke_managed_method` stalls other queued calls
+  to that editor. Calls are serialized, not parallel.
+- **run_tests filters:** `testNames` is prefix/class matching - a class FQN runs
+  all its methods. The result labels *matched-and-ran* separately from the
+  whole-tree *discovered* count and echoes the resolved filter, so "5 passed"
+  can't be mistaken for the wrong 5.
 
 ## Tool Parameters
 
@@ -141,8 +166,8 @@ Published executable (recommended):
 Once configured, an AI agent can:
 
 1. **Check for errors after making code changes:**
-   - Call `unity_recompile`
-   - Call `unity_get_logs` with `minLevel: "error"` to see any compilation errors
+   - Call `sync_and_compile` - it refreshes, recompiles, waits, and returns only
+     the fresh compiler diagnostics in one call (no separate `get_logs` needed)
 
 2. **Test runtime behavior:**
    - Call `unity_set_play_mode` with `isPlaying: true`
@@ -195,7 +220,8 @@ MediaVault/Assets/Scripts/UnityMcp.Editor/
 
 If recompile appears stuck:
 1. Check Unity console for errors preventing compilation
-2. Try `unity_refresh_assets`, then run `unity_recompile` again
+2. Use `sync_and_compile` (it already folds in the asset refresh and waits out
+   the reload) - do not chain `refresh_assets` then `recompile` manually
 
 ## Development
 

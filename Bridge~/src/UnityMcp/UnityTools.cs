@@ -13,9 +13,13 @@ namespace UnityMcp;
 [McpServerToolType]
 public sealed class UnityTools(UnityConnectionPool pool) {
     private const string PortParamDescription =
-        "Optional Unity Editor port to target. Omit to use the default editor selected via 'select_editor', " +
-        "or the only running editor when exactly one is available. Required when multiple editors are running " +
-        "and no default has been selected. Use 'list_editors' to see available ports.";
+        "Optional Unity Editor port to target. AUTO-CONNECT: when omitted, the call attaches to the editor " +
+        "chosen via 'select_editor', or - if none was selected - to the only running editor when exactly one " +
+        "exists (so an omitted-port call can silently attach to whichever single editor is up). Required when " +
+        "multiple editors are running and no default has been selected. All editor state (the selected default, " +
+        "the 'latest' test run) is PER-EDITOR, so the port decides which editor you observe. DOMAIN-RELOAD " +
+        "CONTRACT: while an editor is recompiling / reloading its domain, calls to it fail with a connect error - " +
+        "that is expected; retry after 'sync_and_compile' returns. Use 'list_editors' to see available ports.";
 
     // Non-indented output: System.Text.Json's default encoder escapes '+', '<', '>', '&' and all non-ASCII to
     // \uXXXX, which mangles printable characters in returned strings. The relaxed encoder emits them verbatim.
@@ -374,7 +378,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// <summary>
     /// Invoke any managed method in the Unity process via reflection.
     /// </summary>
-    [McpServerTool(Name = "invoke_managed_method"), Description("Invoke any managed method in the Unity process via reflection. Supports static/instance methods, overload disambiguation, generic args, and JSON arguments.")]
+    [McpServerTool(Name = "invoke_managed_method"), Description("Invoke any managed method in the Unity process via reflection. Supports static/instance methods, overload disambiguation, generic args, and JSON arguments. MAIN-THREAD EXECUTION: Unity runs queued commands on the main thread, ~10 per frame, so a long-running invoke stalls every other queued request to that editor - these calls are serialized, not parallel. Returned strings preserve printable characters verbatim (no unicode escaping).")]
     public async Task<CallToolResult> InvokeManagedMethod(
         [Description("Fully-qualified type name (e.g., 'UnityEditor.EditorApplication')")] string typeName,
         [Description("Method name to invoke")] string methodName,
@@ -421,7 +425,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     public async Task<CallToolResult> RunTests(
         [Description("Test mode: EditMode or PlayMode")] string testMode = "EditMode",
         [Description("Filter by test assembly names (without .dll)")] string[]? assemblyNames = null,
-        [Description("Filter by full test names")] string[]? testNames = null,
+        [Description("Filter by test names. PREFIX/CLASS MATCHING: a value is matched as a prefix, so a fully-qualified class name (e.g. 'MediaVault.Tests.SlugGeneratorTests') selects every test method in that class, a namespace prefix selects everything under it, and a full method name selects that single test. Always confirm the run's echoed 'resolved filter' and matched count - a typo silently matches nothing.")] string[]? testNames = null,
         [Description("Filter by NUnit category names")] string[]? categoryNames = null,
         [Description("Filter by Unity test groups")] string[]? groupNames = null,
         [Description("Optional Unity build target name")] string? targetPlatform = null,
@@ -489,7 +493,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// <summary>
     /// Get the status of a Unity test run.
     /// </summary>
-    [McpServerTool(Name = "get_test_run_status"), Description("Get status and results for a Unity test run. If runId is omitted, returns the latest run.")]
+    [McpServerTool(Name = "get_test_run_status"), Description("Get status and results for a Unity test run. If runId is omitted, returns the LATEST run - but 'latest' is per-editor (pass the matching 'port') and is undefined after a domain reload, which discards in-memory run history; prefer passing the runId that run_tests returned. Output labels matched-and-ran vs the whole-tree discovered count and echoes the resolved filter.")]
     public async Task<CallToolResult> GetTestRunStatus(
         [Description("Optional run identifier returned by run_tests")] string? runId = null,
         [Description(PortParamDescription)] int? port = null,
