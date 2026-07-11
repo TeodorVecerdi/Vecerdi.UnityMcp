@@ -26,12 +26,25 @@ public sealed class LogBuffer : IDisposable {
     private readonly object m_Lock = new();
     private readonly LinkedList<LogEntry> m_Logs = new();
     private int m_MaxSize;
+    private int m_DroppedSinceStart;
 
     public int MaxSize {
         get => m_MaxSize;
         set {
             m_MaxSize = value;
             TrimToSize();
+        }
+    }
+
+    /// <summary>
+    /// Total number of entries evicted because the ring buffer filled, since this buffer was created.
+    /// Lets a caller tell "nothing new was logged" apart from "older entries scrolled out of the buffer".
+    /// </summary>
+    public int DroppedSinceStart {
+        get {
+            lock (m_Lock) {
+                return m_DroppedSinceStart;
+            }
         }
     }
 
@@ -67,12 +80,14 @@ public sealed class LogBuffer : IDisposable {
     private void TrimToSize() {
         while (m_Logs.Count > m_MaxSize) {
             m_Logs.RemoveFirst();
+            m_DroppedSinceStart++;
         }
     }
 
     public void Clear() {
         lock (m_Lock) {
             m_Logs.Clear();
+            m_DroppedSinceStart = 0;
         }
     }
 
@@ -120,7 +135,12 @@ public sealed class GetLogsCommand(LogBuffer logBuffer) : IMcpCommandHandler {
 
         var logs = logBuffer.GetLogs(count, minLevel, filter);
 
-        return McpResponse.Ok(request.Id, new { logs, total = logs.Count });
+        return McpResponse.Ok(request.Id, new {
+            logs,
+            total = logs.Count,
+            droppedSinceStart = logBuffer.DroppedSinceStart,
+            capacity = logBuffer.MaxSize,
+        });
     }
 }
 
