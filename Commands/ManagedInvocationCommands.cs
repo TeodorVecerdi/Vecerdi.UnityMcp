@@ -487,7 +487,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             return new {
                 type = type.FullName ?? type.Name,
                 name = unityObject.name,
-                instanceId = unityObject.GetInstanceID(),
+                entityId = unityObject.GetEntityId(),
             };
         }
 
