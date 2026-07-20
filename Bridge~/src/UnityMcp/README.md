@@ -1,6 +1,6 @@
 # Unity MCP Server
 
-A Model Context Protocol (MCP) server that enables AI agents to interact with the Unity Editor. This allows AI coding assistants to verify their work, see compilation errors, and control play mode.
+A Model Context Protocol (MCP) server that enables AI agents to interact with the Unity Editor. This allows AI coding assistants to verify their work, see compilation errors, run tests, and control play mode.
 
 ## Architecture
 
@@ -11,20 +11,35 @@ A Model Context Protocol (MCP) server that enables AI agents to interact with th
 └─────────────────────┘
          │ MCP Protocol (stdio)
 ┌─────────────────────┐
-│  unity-mcp          │  ← This tool (C# console app)
+│  unity-mcp          │  ← This tool (C# console app, "the bridge")
 │  (MCP Server)       │
 └─────────────────────┘
-         │ WebSocket
+         │ WebSocket (one pooled connection per editor)
 ┌─────────────────────┐
-│  Unity Editor       │
+│  Unity Editor(s)    │
 │  └─ McpEditorServer │  ← Editor plugin (auto-starts)
 └─────────────────────┘
 ```
 
+Tools come from two places:
+
+- **Native tools** live in this bridge (`UnityTools.cs`): everything with bridge-side logic —
+  `sync_and_compile`'s wait/diagnostics orchestration, `run_tests` polling, `get_logs`
+  formatting, `invoke_managed_method`, and the editor-discovery pair
+  (`list_editors`/`select_editor`).
+- **Dynamic tools** are advertised by the editor itself: Unity-side commands implementing
+  `IMcpToolProvider` are enumerated via `unity.meta.listTools` and registered by
+  `DynamicToolManager` whenever an editor connection (re)opens — including the reconnect after
+  every domain reload, so a `sync_and_compile` that compiles a new tool makes it appear in the
+  same agent session (`notifications/tools/list_changed`). **Adding an editor-side tool
+  therefore needs no bridge rebuild**: implement the command + descriptor in
+  `MediaVault/Assets/Scripts/Vecerdi.UnityMcp/`, register it in `McpEditorServer`, recompile.
+  Native tool names shadow dynamic ones, so bridge tools can be migrated gradually.
+
 ## Prerequisites
 
 1. **.NET 10 SDK** installed
-2. **Unity Editor** with the MCP plugin (in `MediaVault/Assets/Scripts/UnityMcp.Editor/`)
+2. **Unity Editor** with the MCP plugin (in `MediaVault/Assets/Scripts/Vecerdi.UnityMcp/`)
 
 ## Building
 
@@ -33,48 +48,21 @@ cd tools/unity-mcp
 dotnet build
 ```
 
-For Copilot CLI and other MCP clients, prefer publishing a stable executable and pointing the client at that binary. Build output uses the artifacts output layout (see the repo-root `tools/Directory.Build.props`), so the published binary lands at `<repo>/artifacts/publish/UnityMcp/release/unity-mcp.exe`:
+For MCP clients, publish a stable executable and point the client at that binary. Build output uses the artifacts output layout (see the repo-root `tools/Directory.Build.props`), so the published binary lands at `<repo>/artifacts/publish/UnityMcp/release/unity-mcp.exe`:
 
 ```bash
 dotnet publish -c Release
 ```
 
-If you change code under `tools/unity-mcp`, rerun that publish command before expecting MCP clients to use the updated implementation.
-
-If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, stop the MCP client that is currently running the server, publish again, then restart the client.
+If you change code under `tools/unity-mcp`, rerun that publish command before expecting MCP clients to use the updated implementation. If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, stop the MCP client that is currently running the server, publish again, then restart the client. (Editor-side tool changes need neither publish nor client restart — see dynamic tools above.)
 
 ## Configuration for AI Agents
 
-### Claude Desktop / Cursor / etc.
-
-For local manual development you can use `dotnet run`, but for normal MCP client configuration prefer the published executable to avoid restore/build-on-start delays and file-locking issues.
-
-Published executable (recommended):
-
 ```json
 {
   "mcpServers": {
     "unity": {
-      "command": "D:/dev/unity/media-vault/artifacts/publish/UnityMcp/release/unity-mcp.exe",
-      "env": {
-        "UNITY_MCP_LOG": "D:/dev/unity/media-vault/tools/unity-mcp/mcp.log"
-      }
-    }
-  }
-}
-```
-
-`dotnet run` example for ad-hoc local use:
-
-```json
-{
-  "mcpServers": {
-    "unity": {
-      "command": "dotnet",
-      "args": ["run", "--project", "D:/dev/unity/media-vault/tools/unity-mcp/UnityMcp.csproj"],
-      "env": {
-        "UNITY_MCP_LOG": "D:/dev/unity/media-vault/tools/unity-mcp/mcp.log"
-      }
+      "command": "D:/dev/unity/media-vault/artifacts/publish/UnityMcp/release/unity-mcp.exe"
     }
   }
 }
@@ -84,25 +72,39 @@ Published executable (recommended):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `UNITY_MCP_URI` | `ws://localhost:9999/` | WebSocket URI of the Unity MCP plugin |
-| `UNITY_MCP_LOG` | (none) | Path to log file for debugging |
+| `UNITY_MCP_LOG_LEVEL` | `information` | Bridge log verbosity: `trace`, `debug`, `information`, `warning`, `error` |
+
+### Logging
+
+The bridge logs **only to stderr** (stdout carries the MCP protocol); there is no log file.
+Your MCP client captures stderr — Claude Code writes it (plus its own tool-call tracing) to
+per-launch JSONL files under
+`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project-slug>\mcp-logs-unity-mcp\`.
 
 ## Available Tools
+
+Native (bridge-side):
 
 | Tool | Description |
 |------|-------------|
 | `sync_and_compile` | **Default "make my edits take effect" call.** Refresh + recompile + wait + fresh diagnostics, as one operation |
+| `refresh_assets` | Refresh asset database; reports whether a compile was triggered (prefer `sync_and_compile` for code changes) |
 | `get_logs` | Get recent Unity console logs (with timestamps + buffer-wrap note) |
-| `clear_logs` | Clear the log buffer |
-| `recompile` | Force script recompilation (equivalent to `sync_and_compile`; kept for compatibility) |
-| `get_play_mode_state` | Check play mode state |
-| `set_play_mode` | Set play mode state (enter/exit via `isPlaying`) |
-| `refresh_assets` | Refresh asset database; reports whether a compile was triggered |
-| `invoke_managed_method` | Invoke managed methods via reflection with JSON arguments |
+| `invoke_managed_method` | Invoke managed methods via reflection with JSON arguments; Task/UniTask results are awaited up to `waitMs`, then backgrounded (see below) |
 | `run_tests` | Run Unity tests with filter support and optional wait-for-completion |
 | `get_test_run_status` | Get status/results of a test run |
 | `cancel_test_run` | Cancel an active test run |
 | `list_editors` / `select_editor` | Discover editors and set the default target |
+
+Dynamic (editor-advertised; the live set is whatever the connected editor exposes):
+
+| Tool | Description |
+|------|-------------|
+| `get_editor_info` | Unity version, project name/path, build target, play/compile state |
+| `get_play_mode_state` / `set_play_mode` | Query / enter / exit play mode |
+| `execute_menu_item` | Execute a menu item by path |
+| `clear_logs` | Clear the log buffer |
+| `get_invocation_result` | Poll a backgrounded `invoke_managed_method` call |
 
 ### Key semantics
 
@@ -110,9 +112,9 @@ Published executable (recommended):
   import/compile, refreshes assets, forces a recompile, waits out the domain
   reload, and returns **only** the compiler diagnostics from that compile (parsed
   into `file(line,col): severity CODE: message`). Do **not** chain
-  `refresh_assets` then `recompile` - that race is the footgun this tool removes.
-- **Domain-reload contract:** `sync_and_compile`/`recompile` block (up to ~3 min)
-  and drive a domain reload; any *other* call to the same editor mid-reload fails
+  `refresh_assets` then a manual recompile - that race is the footgun this tool removes.
+- **Domain-reload contract:** `sync_and_compile` blocks (up to ~3 min)
+  and drives a domain reload; any *other* call to the same editor mid-reload fails
   with a connect error. Expect it, and retry after the call returns.
 - **Auto-connect:** a tool call with no `port` attaches to the `select_editor`
   default, or to the only running editor when exactly one exists.
@@ -122,106 +124,66 @@ Published executable (recommended):
 - **Main-thread execution:** the editor processes ~10 queued commands per frame
   on the main thread, so a slow `invoke_managed_method` stalls other queued calls
   to that editor. Calls are serialized, not parallel.
+- **Async invokes never deadlock:** `invoke_managed_method` waits at most `waitMs`
+  (default 2s) for a Task/UniTask result, then returns `{pending: true, invocationId}`
+  and lets the main thread resume - which is what allows main-thread-bound
+  continuations (UniTask/PlayerLoop) to complete. Poll `get_invocation_result` for
+  the outcome (handed out once; entries expire after ~1h or on domain reload).
 - **run_tests filters:** `testNames` is prefix/class matching - a class FQN runs
   all its methods. The result labels *matched-and-ran* separately from the
   whole-tree *discovered* count and echoes the resolved filter, so "5 passed"
   can't be mistaken for the wrong 5.
 
-## Tool Parameters
-
-### `unity_get_logs`
-
-```json
-{
-  "count": 100,        // Max entries to return
-  "minLevel": "error", // Filter: "info", "warning", or "error"
-  "filter": "NullRef"  // Text filter (case-insensitive)
-}
-```
-
-### `unity_invoke_managed_method`
-
-```json
-{
-  "typeName": "UnityEditor.EditorApplication",
-  "methodName": "ExecuteMenuItem",
-  "arguments": ["File/Save Project"],
-  "parameterTypeNames": ["System.String"]
-}
-```
-
-### `unity_run_tests`
-
-```json
-{
-  "testMode": "EditMode",
-  "assemblyNames": ["MediaVault.Tests"],
-  "categoryNames": ["Fast"],
-  "waitForCompletion": true
-}
-```
-
-## Example Usage
-
-Once configured, an AI agent can:
-
-1. **Check for errors after making code changes:**
-   - Call `sync_and_compile` - it refreshes, recompiles, waits, and returns only
-     the fresh compiler diagnostics in one call (no separate `get_logs` needed)
-
-2. **Test runtime behavior:**
-   - Call `unity_set_play_mode` with `isPlaying: true`
-   - Wait for initialization
-   - Call `unity_get_logs` to see runtime errors
-   - Call `unity_set_play_mode` with `isPlaying: false`
-
-3. **Debug issues:**
-   - Call `unity_get_logs` with a `filter` for the relevant component name
-   - Check stack traces in the response
-
 ## Unity Editor Plugin
 
-The server communicates with Unity via a WebSocket server running in the Editor. The plugin:
+The bridge communicates with Unity via a WebSocket server running in the Editor. The plugin:
 
 - Auto-starts when Unity loads (`[InitializeOnLoad]`)
-- Listens on `ws://localhost:9999/`
+- Allocates a port dynamically from 9100 upward and registers it in a discovery file, so
+  multiple editors can run side by side (`list_editors` reads that registry)
 - Processes commands on the main thread (safe for Unity API calls)
 - Survives play mode transitions and script reloads
 
 ### Plugin Location
 
 ```
-MediaVault/Assets/Scripts/UnityMcp.Editor/
-├── McpEditorServer.cs       # WebSocket server
-├── McpServerWindow.cs       # Editor window (Window > Unity MCP Server)
+MediaVault/Assets/Scripts/Vecerdi.UnityMcp/
+├── McpEditorServer.cs        # WebSocket server + command registration
+├── McpServerWindow.cs        # Editor window (Window > Unity MCP Server)
+├── EditorInstanceRegistry.cs # Dynamic port allocation + discovery file
 ├── Protocol/
-│   └── McpMessage.cs        # Request/Response types
+│   └── McpMessage.cs         # Request/Response types
 └── Commands/
-    ├── McpCommandRegistry.cs
-    ├── DebugCommands.cs     # getLogs, clearLogs
-    └── EditorCommands.cs    # recompile, playMode, etc.
+    ├── McpCommandRegistry.cs # Dispatch + IMcpToolProvider/McpToolDescriptor
+    ├── MetaCommands.cs       # unity.meta.listTools (dynamic tool discovery)
+    ├── DebugCommands.cs      # getLogs, clearLogs
+    ├── EditorCommands.cs     # recompile, playMode, menu items, editor info
+    └── ManagedInvocationCommands.cs # reflection invoke + pending-invocation registry
 ```
 
 ## Troubleshooting
 
-### "Failed to connect to Unity Editor"
+### "Failed to connect to Unity Editor" / "No Unity Editor instances found"
 
 1. Make sure Unity Editor is running
 2. Check `Window > Unity MCP Server` - the server should show "Running"
-3. Verify the port matches `UNITY_MCP_URI` (default: 9999)
+3. Call `list_editors` to see discovered instances; right after Unity starts, the first
+   call can race discovery - retry once
+4. If a modal dialog is open in the editor, every call fails generically while
+   `list_editors` still works - dismiss the dialog
 
 ### No logs appearing
 
 1. The log buffer only captures logs while the plugin is active
 2. Logs from before the server started won't be available
-3. Try triggering an action that generates logs, then call `unity_get_logs`
+3. Try triggering an action that generates logs, then call `get_logs`
 
 ### Compilation takes a long time
 
-If recompile appears stuck:
+If a compile appears stuck:
 1. Check Unity console for errors preventing compilation
 2. Use `sync_and_compile` (it already folds in the asset refresh and waits out
-   the reload) - do not chain `refresh_assets` then `recompile` manually
+   the reload) - do not chain `refresh_assets` then a manual recompile
 
 ## Development
 
@@ -238,5 +200,5 @@ dotnet run
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 
 # Call a tool:
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"unity_get_logs","arguments":{"count":10}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_logs","arguments":{"count":10}}}
 ```
