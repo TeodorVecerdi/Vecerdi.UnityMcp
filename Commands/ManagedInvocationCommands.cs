@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -11,10 +12,107 @@ using Object = UnityEngine.Object;
 namespace Vecerdi.UnityMcp.Commands;
 
 /// <summary>
+/// Tasks returned by invoked methods that outlived the bounded wait. Entries are handed out
+/// once (removed when a completed/faulted result is retrieved) and expire after an hour or on
+/// domain reload — a pending invocation is a live poll target, not durable storage.
+/// </summary>
+internal static class PendingInvocationRegistry {
+    private sealed record Entry(Task Task, string Method, DateTime StartedUtc);
+
+    private static readonly ConcurrentDictionary<string, Entry> s_Entries = new();
+    private static readonly TimeSpan s_MaxAge = TimeSpan.FromHours(1);
+
+    public static string Register(Task task, string method) {
+        foreach (var (key, entry) in s_Entries) {
+            if (DateTime.UtcNow - entry.StartedUtc > s_MaxAge) {
+                s_Entries.TryRemove(key, out _);
+            }
+        }
+
+        var id = Guid.NewGuid().ToString("N")[..12];
+        s_Entries[id] = new Entry(task, method, DateTime.UtcNow);
+        return id;
+    }
+
+    public static bool TryGet(string id, out Task task, out string method, out TimeSpan elapsed) {
+        if (s_Entries.TryGetValue(id, out var entry)) {
+            task = entry.Task;
+            method = entry.Method;
+            elapsed = DateTime.UtcNow - entry.StartedUtc;
+            return true;
+        }
+
+        task = null!;
+        method = string.Empty;
+        elapsed = default;
+        return false;
+    }
+
+    public static void Remove(string id) => s_Entries.TryRemove(id, out _);
+}
+
+/// <summary>
+/// Command: unity.managed.getInvocationResult - Poll a pending invocation started by
+/// unity.managed.invokeMethod (todo #387).
+/// </summary>
+public sealed class GetInvocationResultCommand : IMcpCommandHandler {
+    public string Command => "unity.managed.getInvocationResult";
+
+    public McpResponse Execute(McpRequest request) {
+        var invocationId = request.GetParam<string>("invocationId");
+        if (string.IsNullOrWhiteSpace(invocationId)) {
+            return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, "invocationId is required");
+        }
+
+        if (!PendingInvocationRegistry.TryGet(invocationId, out var task, out var method, out var elapsed)) {
+            return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, $"Unknown or expired invocationId '{invocationId}' (results are handed out once; entries expire after an hour or on domain reload).");
+        }
+
+        if (!task.IsCompleted) {
+            return McpResponse.Ok(request.Id, new Dictionary<string, object?> {
+                ["status"] = "running",
+                ["method"] = method,
+                ["elapsedSeconds"] = Math.Round(elapsed.TotalSeconds, 1),
+            });
+        }
+
+        PendingInvocationRegistry.Remove(invocationId);
+
+        if (task.IsCanceled) {
+            return McpResponse.Fail(request.Id, McpErrorCodes.ExecutionFailed, $"Invocation '{method}' was cancelled.");
+        }
+
+        if (task.IsFaulted) {
+            var inner = task.Exception?.GetBaseException() ?? new Exception("Unknown failure");
+            return McpResponse.Fail(
+                request.Id,
+                McpErrorCodes.ExecutionFailed,
+                $"Invocation '{method}' failed: {inner.Message}",
+                new {
+                    exception = inner.GetType().FullName,
+                    stackTrace = inner.StackTrace,
+                }
+            );
+        }
+
+        return McpResponse.Ok(request.Id, new Dictionary<string, object?> {
+            ["status"] = "completed",
+            ["method"] = method,
+            ["returnValue"] = InvokeManagedMethodCommand.SerializeResult(InvokeManagedMethodCommand.ExtractTaskResult(task)),
+        });
+    }
+}
+
+/// <summary>
 /// Command: unity.managed.invokeMethod - Invoke a managed method via reflection.
 /// </summary>
 public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
     public string Command => "unity.managed.invokeMethod";
+
+    /// <summary>Default bounded wait for Task-returning methods. Must stay well under the
+    /// bridge's 30s per-request timeout.</summary>
+    private const int DefaultTaskWaitMs = 2000;
+    private const int MaxTaskWaitMs = 25000;
 
     private static readonly JsonSerializerOptions s_JsonOptions = new() {
         PropertyNameCaseInsensitive = true,
@@ -129,9 +227,58 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             }
         }
 
+        var waitMs = Math.Clamp(request.GetParam("waitMs", DefaultTaskWaitMs), 0, MaxTaskWaitMs);
+
         try {
             var invocationResult = resolvedMethod.Invoke(instance, convertedArguments);
-            var returnValue = AwaitIfTask(invocationResult, out var awaitedTask);
+            if (invocationResult is not null and not Task && TryConvertUniTaskToTask(invocationResult) is { } convertedTask) {
+                invocationResult = convertedTask;
+            }
+
+            var awaitedTask = false;
+            object? returnValue = invocationResult;
+
+            if (invocationResult is Task task) {
+                awaitedTask = true;
+
+                // Bounded wait, never GetResult(): this runs on the editor main thread, and an
+                // unbounded block deadlocks any task whose continuations need that same thread
+                // (UniTask/PlayerLoop, Unity sync context — todo #387). If the task outlives
+                // the window, hand back a poll handle instead; once this method returns, the
+                // main thread resumes pumping and the stuck continuations can actually run.
+                bool completedInTime;
+                try {
+                    completedInTime = task.Wait(waitMs);
+                } catch (AggregateException aggregate) {
+                    var inner = aggregate.GetBaseException();
+                    return McpResponse.Fail(
+                        request.Id,
+                        McpErrorCodes.ExecutionFailed,
+                        $"Method invocation failed: {inner.Message}",
+                        new {
+                            exception = inner.GetType().FullName,
+                            stackTrace = inner.StackTrace,
+                        }
+                    );
+                }
+
+                if (!completedInTime) {
+                    var invocationId = PendingInvocationRegistry.Register(task, DescribeMethod(resolvedMethod));
+                    // The task may still be using the instance — leave disposal to the task's
+                    // owner rather than yanking it mid-flight (clears the finally's dispose).
+                    instance = null;
+
+                    return McpResponse.Ok(request.Id, new Dictionary<string, object?> {
+                        ["pending"] = true,
+                        ["invocationId"] = invocationId,
+                        ["returnType"] = FriendlyTypeName(resolvedMethod.ReturnType),
+                        ["message"] = $"Task still running after {waitMs}ms; poll get_invocation_result with this invocationId.",
+                    });
+                }
+
+                returnValue = ExtractTaskResult(task);
+            }
+
             var serializedValue = SerializeResult(returnValue);
 
             // Keep the payload lean: the caller already knows the type/method/flags it requested, so echoing them
@@ -412,23 +559,50 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         return false;
     }
 
-    private static object? AwaitIfTask(object? invocationResult, out bool awaitedTask) {
-        awaitedTask = false;
-
-        if (invocationResult is not Task task) {
-            return invocationResult;
-        }
-
-        awaitedTask = true;
-        task.GetAwaiter().GetResult();
-
+    /// <summary>Result value of a completed <see cref="Task"/> (null for non-generic tasks and
+    /// async-void-shaped <c>Task&lt;VoidTaskResult&gt;</c>).</summary>
+    internal static object? ExtractTaskResult(Task task) {
         var taskType = task.GetType();
         if (!taskType.IsGenericType) {
             return null;
         }
 
         var resultProperty = taskType.GetProperty("Result", BindingFlags.Public | BindingFlags.Instance);
-        return resultProperty?.GetValue(task);
+        var result = resultProperty?.GetValue(task);
+        return result?.GetType().Name == "VoidTaskResult" ? null : result;
+    }
+
+    /// <summary>
+    /// Converts a boxed <c>UniTask</c>/<c>UniTask&lt;T&gt;</c> return value to a <see cref="Task"/>
+    /// via Cysharp's <c>UniTaskExtensions.AsTask</c>, resolved by reflection so this assembly
+    /// needs no UniTask reference. Returns null for anything else (including <c>UniTaskVoid</c>,
+    /// which is fire-and-forget by contract and cannot be observed).
+    /// </summary>
+    private static Task? TryConvertUniTaskToTask(object invocationResult) {
+        var type = invocationResult.GetType();
+        var fullName = type.IsGenericType ? type.GetGenericTypeDefinition().FullName : type.FullName;
+        if (fullName is not "Cysharp.Threading.Tasks.UniTask" and not "Cysharp.Threading.Tasks.UniTask`1") {
+            return null;
+        }
+
+        var extensions = type.Assembly.GetType("Cysharp.Threading.Tasks.UniTaskExtensions");
+        if (extensions is null) {
+            return null;
+        }
+
+        try {
+            if (type.IsGenericType) {
+                var generic = extensions.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m => m.Name == "AsTask" && m.IsGenericMethod && m.GetParameters() is { Length: 1 } p && p[0].ParameterType.IsGenericType);
+                return generic is null ? null : (Task?)generic.MakeGenericMethod(type.GetGenericArguments()).Invoke(null, [invocationResult]);
+            }
+
+            var nonGeneric = extensions.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "AsTask" && !m.IsGenericMethod && m.GetParameters() is { Length: 1 } p && p[0].ParameterType == type);
+            return (Task?)nonGeneric?.Invoke(null, [invocationResult]);
+        } catch {
+            return null; // fall back to serializing the raw struct, as before
+        }
     }
 
     /// <summary>
@@ -469,7 +643,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         return $"{name}<{args}>";
     }
 
-    private static object? SerializeResult(object? value, int depth = 0) {
+    internal static object? SerializeResult(object? value, int depth = 0) {
         if (value is null) return null;
         if (depth > 4) return value.ToString();
 

@@ -92,6 +92,7 @@ public sealed class McpEditorServer {
         m_Commands.Register(new RefreshAssetsCommand());
         m_Commands.Register(new ExecuteMenuItemCommand());
         m_Commands.Register(new InvokeManagedMethodCommand());
+        m_Commands.Register(new GetInvocationResultCommand());
         m_Commands.Register(new RunTestsCommand());
         m_Commands.Register(new GetTestRunStatusCommand());
         m_Commands.Register(new CancelTestRunCommand());

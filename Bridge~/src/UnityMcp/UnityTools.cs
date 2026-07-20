@@ -378,7 +378,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// <summary>
     /// Invoke any managed method in the Unity process via reflection.
     /// </summary>
-    [McpServerTool(Name = "invoke_managed_method"), Description("Invoke any managed method in the Unity process via reflection. Supports static/instance methods, overload disambiguation, generic args, and JSON arguments. MAIN-THREAD EXECUTION: Unity runs queued commands on the main thread, ~10 per frame, so a long-running invoke stalls every other queued request to that editor - these calls are serialized, not parallel. Returned strings preserve printable characters verbatim (no unicode escaping).")]
+    [McpServerTool(Name = "invoke_managed_method"), Description("Invoke any managed method in the Unity process via reflection. Supports static/instance methods, overload disambiguation, generic args, and JSON arguments. MAIN-THREAD EXECUTION: Unity runs queued commands on the main thread, ~10 per frame, so a long-running invoke stalls every other queued request to that editor - these calls are serialized, not parallel. ASYNC METHODS: Task- and UniTask-returning methods are awaited for up to waitMs (default 2000ms); if still running, the call returns {pending: true, invocationId} immediately (unblocking the editor main thread, which is exactly what lets main-thread-bound continuations complete) - poll get_invocation_result with that invocationId for the outcome. Returned strings preserve printable characters verbatim (no unicode escaping).")]
     public async Task<CallToolResult> InvokeManagedMethod(
         [Description("Fully-qualified type name (e.g., 'UnityEditor.EditorApplication')")] string typeName,
         [Description("Method name to invoke")] string methodName,
@@ -389,6 +389,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         [Description("Invoke as instance method instead of static")] bool invokeOnInstance = false,
         [Description("Constructor arguments when invokeOnInstance=true")] object[]? constructorArguments = null,
         [Description("Allow non-public members")] bool includeNonPublic = false,
+        [Description("How long (ms) to wait for a Task/UniTask result before backgrounding it (default 2000, max 25000). The wait blocks the editor main thread, so keep it short for tasks that may need that thread.")] int? waitMs = null,
         [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
@@ -407,6 +408,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         if (!string.IsNullOrWhiteSpace(assemblyName)) parameters["assemblyName"] = assemblyName;
         if (parameterTypeNames is { Length: > 0 }) parameters["parameterTypeNames"] = parameterTypeNames;
         if (genericTypeNames is { Length: > 0 }) parameters["genericTypeNames"] = genericTypeNames;
+        if (waitMs is { } wait) parameters["waitMs"] = wait;
 
         var response = await unity!.SendAsync("unity.managed.invokeMethod", parameters, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
@@ -416,6 +418,26 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         }
 
         return Success(JsonSerializer.Serialize(result, s_OutputJson));
+    }
+
+    /// <summary>
+    /// Poll a backgrounded invoke_managed_method call.
+    /// </summary>
+    [McpServerTool(Name = "get_invocation_result"), Description("Poll the outcome of a backgrounded invoke_managed_method call. When invoke_managed_method returns {pending: true, invocationId}, the invoked Task kept running without blocking the editor; call this with that invocationId until status is 'completed' (includes returnValue) or the call reports the failure. Results are handed out once - the pending entry is removed on a completed/faulted poll, and unclaimed entries expire after ~1 hour or on domain reload.")]
+    public async Task<CallToolResult> GetInvocationResult(
+        [Description("The invocationId returned by a pending invoke_managed_method call")] string invocationId,
+        [Description(PortParamDescription)] int? port = null,
+        CancellationToken ct = default
+    ) {
+        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
+        if (connectionError is not null) return connectionError;
+
+        var response = await unity!.SendAsync("unity.managed.getInvocationResult", new { invocationId }, ct);
+        if (ToErrorResult(response) is { } errorResult) return errorResult;
+
+        return response.Result is { } result
+            ? Success(JsonSerializer.Serialize(result, s_OutputJson))
+            : Success("No result payload.");
     }
 
     /// <summary>
