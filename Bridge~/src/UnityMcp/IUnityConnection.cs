@@ -5,6 +5,14 @@ namespace UnityMcp;
 /// so the connection pool can be exercised with fake connections in tests.
 /// </summary>
 public interface IUnityConnection : IAsyncDisposable {
+    /// <summary>
+    /// Raised after every successful connect — including reconnects performed inside
+    /// <see cref="WaitForConnectionAsync"/> (e.g. surviving a domain reload). Dynamic tool
+    /// discovery keys off this: a fresh connection is the moment the editor's tool set may
+    /// have changed.
+    /// </summary>
+    event Action? Connected;
+
     /// <summary>Whether the underlying transport is currently open.</summary>
     bool IsConnected { get; }
 

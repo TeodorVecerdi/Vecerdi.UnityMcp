@@ -58,7 +58,10 @@ public sealed class UnityClient : IUnityConnection {
         m_Timeout = timeout ?? TimeSpan.FromSeconds(30);
     }
 
+    public event Action? Connected;
+
     public async Task ConnectAsync(CancellationToken ct = default) {
+        var opened = false;
         await m_LifecycleLock.WaitAsync(ct);
         try {
             if (m_WebSocket?.State == WebSocketState.Open) return;
@@ -81,12 +84,18 @@ public sealed class UnityClient : IUnityConnection {
 
                 webSocket = null;
                 receiveCts = null;
+                opened = true;
             } finally {
                 webSocket?.Dispose();
                 receiveCts?.Dispose();
             }
         } finally {
             m_LifecycleLock.Release();
+        }
+
+        // Raised outside the lifecycle lock: handlers may immediately send on this connection.
+        if (opened) {
+            Connected?.Invoke();
         }
     }
 

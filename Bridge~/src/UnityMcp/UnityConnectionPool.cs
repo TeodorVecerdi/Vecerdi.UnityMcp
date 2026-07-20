@@ -31,15 +31,21 @@ public sealed class UnityConnectionPool : IAsyncDisposable {
     }
 
     /// <summary>Get (or lazily create) the pooled connection for a port. Does not open it.</summary>
-    public IUnityConnection GetConnection(int port) => m_Connections.GetOrAdd(port, m_ConnectionFactory);
+    public IUnityConnection GetConnection(int port) => m_Connections.GetOrAdd(port, p => {
+        var connection = m_ConnectionFactory(p);
+        connection.Connected += () => ConnectionOpened?.Invoke(p, connection);
+        return connection;
+    });
 
     /// <summary>Whether a connection for <paramref name="port"/> exists in the pool and is open.</summary>
     public bool IsConnected(int port) => m_Connections.TryGetValue(port, out var connection) && connection.IsConnected;
 
     /// <summary>
-    /// Raised after a pooled connection is (re)opened by <see cref="AcquireAsync"/>. Fires on
-    /// every reconnect — including after a domain reload, which is exactly when the editor's
-    /// dynamic tool set may have changed.
+    /// Raised after a pooled connection (re)opens, forwarded from the connection's own
+    /// <see cref="IUnityConnection.Connected"/> event — so it fires on EVERY successful
+    /// connect, including the internal reconnects inside WaitForConnectionAsync that follow a
+    /// domain reload (exactly when the editor's dynamic tool set may have changed), not just
+    /// connects that happen to go through <see cref="AcquireAsync"/>.
     /// </summary>
     public event Action<int, IUnityConnection>? ConnectionOpened;
 
@@ -51,7 +57,6 @@ public sealed class UnityConnectionPool : IAsyncDisposable {
         var connection = GetConnection(port);
         if (!connection.IsConnected) {
             await connection.ConnectAsync(ct);
-            ConnectionOpened?.Invoke(port, connection);
         }
 
         return connection;
