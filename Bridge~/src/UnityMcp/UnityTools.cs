@@ -13,13 +13,10 @@ namespace UnityMcp;
 [McpServerToolType]
 public sealed class UnityTools(UnityConnectionPool pool) {
     private const string PortParamDescription =
-        "Optional Unity Editor port to target. AUTO-CONNECT: when omitted, the call attaches to the editor " +
-        "chosen via 'select_editor', or - if none was selected - to the only running editor when exactly one " +
-        "exists (so an omitted-port call can silently attach to whichever single editor is up). Required when " +
-        "multiple editors are running and no default has been selected. All editor state (the selected default, " +
-        "the 'latest' test run) is PER-EDITOR, so the port decides which editor you observe. DOMAIN-RELOAD " +
-        "CONTRACT: while an editor is recompiling / reloading its domain, calls to it fail with a connect error - " +
-        "that is expected; retry after 'sync_and_compile' returns. Use 'list_editors' to see available ports.";
+        "Optional Unity Editor port. Omitted: targets the 'select_editor' default, else the only running editor; " +
+        "required when several run and no default is set ('list_editors' shows ports). Editor state (default " +
+        "selection, latest test run) is per-editor. Calls to an editor mid-domain-reload fail with a connect " +
+        "error - expected; retry after 'sync_and_compile' returns.";
 
     // Non-indented output: System.Text.Json's default encoder escapes '+', '<', '>', '&' and all non-ASCII to
     // \uXXXX, which mangles printable characters in returned strings. The relaxed encoder emits them verbatim.
@@ -88,15 +85,11 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     // bridge-side logic (multi-step waits, formatting, discovery) stay native here.
 
     private const string SyncAndCompileDescription =
-        "THE default 'make my code edits take effect' call. One coherent operation: waits for any import/compile " +
-        "already in flight to settle, refreshes the Asset Database, forces a script recompilation, waits for the " +
-        "compile and the domain reload that follows a successful build, then returns ONLY the compiler diagnostics " +
-        "produced by THIS compile (stale pre-compile console errors are never resurfaced). Diagnostics are parsed " +
-        "into file(line,col): severity CODE: message form. Because it absorbs the refresh internally, you never " +
-        "need to call refresh_assets before it - chaining refresh_assets then recompile is the classic footgun " +
-        "this tool removes. DOMAIN-RELOAD CONTRACT: this call blocks up to ~3 minutes and drives a domain reload; " +
-        "any OTHER tool aimed at the same editor mid-reload will fail with a connect error - expect that, and " +
-        "retry once this call returns.";
+        "THE default 'make my code edits take effect' call: waits out any in-flight import/compile, refreshes the " +
+        "Asset Database, forces a recompile, waits for the domain reload, and returns ONLY the compiler diagnostics " +
+        "produced by THIS compile (never stale console errors). Absorbs the refresh internally - do not call " +
+        "refresh_assets first. Blocks up to ~3 minutes and drives a domain reload; other calls to the same editor " +
+        "fail with connect errors until it returns.";
 
     /// <summary>
     /// Unified refresh + recompile. Waits for in-flight compilation to settle, refreshes assets, forces a
@@ -113,22 +106,8 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     }
 
     /// <summary>
-    /// Force Unity to recompile all scripts. Retained for compatibility; delegates to the same coherent
-    /// refresh + compile + fresh-diagnostics core as <see cref="SyncAndCompile"/>.
-    /// </summary>
-    [McpServerTool(Name = "recompile"), Description("Force Unity to recompile all scripts and return only fresh compiler diagnostics. Equivalent to 'sync_and_compile' (kept for compatibility) - it also refreshes assets first and waits out any in-flight compile, so it is safe to call directly. Prefer 'sync_and_compile' as the canonical name. Blocking; drives a domain reload (see the domain-reload contract on 'sync_and_compile').")]
-    public async Task<CallToolResult> Recompile(
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-        return await RunSyncAndCompileAsync(unity!, ct);
-    }
-
-    /// <summary>
-    /// The shared, self-contained refresh -> wait -> compile -> wait -> fresh-diagnostics operation used by
-    /// both <c>sync_and_compile</c> and <c>recompile</c>. Never trips over an in-flight compile because it
+    /// The self-contained refresh -> wait -> compile -> wait -> fresh-diagnostics operation behind
+    /// <c>sync_and_compile</c>. Never trips over an in-flight compile because it
     /// drains any pending import/compile before starting its own, and marks the log-buffer position so only
     /// diagnostics produced by this compile are returned.
     /// </summary>
