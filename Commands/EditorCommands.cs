@@ -148,3 +148,27 @@ public sealed class ExecuteMenuItemCommand : IMcpCommandHandler, IMcpToolProvide
         return McpResponse.Ok(request.Id, new { executed = true, menuItem });
     }
 }
+
+/// <summary>
+/// Command: unity.editor.getInfo - Editor and project identity/state at a glance.
+/// </summary>
+public sealed class GetEditorInfoCommand : IMcpCommandHandler, IMcpToolProvider {
+    public string Command => "unity.editor.getInfo";
+
+    public McpToolDescriptor ToolDescriptor { get; } = new(
+        "get_editor_info",
+        "Get the targeted editor's identity and state at a glance: Unity version, project name/path, active build target, play mode, and whether a compile/import is in flight.",
+        """{"type":"object","properties":{}}""");
+
+    public McpResponse Execute(McpRequest request) {
+        return McpResponse.Ok(request.Id, new {
+            unityVersion = UnityEngine.Application.unityVersion,
+            projectName = UnityEngine.Application.productName,
+            projectPath = System.IO.Path.GetDirectoryName(UnityEngine.Application.dataPath),
+            buildTarget = EditorUserBuildSettings.activeBuildTarget.ToString(),
+            isPlaying = EditorApplication.isPlaying,
+            isCompiling = EditorApplication.isCompiling,
+            isUpdating = EditorApplication.isUpdating,
+        });
+    }
+}
