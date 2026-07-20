@@ -147,8 +147,13 @@ public sealed class GetLogsCommand(LogBuffer logBuffer) : IMcpCommandHandler {
 /// <summary>
 /// Command: unity.debug.clearLogs - Clear the log buffer and Unity Console.
 /// </summary>
-public sealed class ClearLogsCommand(LogBuffer logBuffer, ILogger? logger = null) : IMcpCommandHandler {
+public sealed class ClearLogsCommand(LogBuffer logBuffer, ILogger? logger = null) : IMcpCommandHandler, IMcpToolProvider {
     public string Command => "unity.debug.clearLogs";
+
+    public McpToolDescriptor ToolDescriptor { get; } = new(
+        "clear_logs",
+        "Clear the Unity console log buffer.",
+        """{"type":"object","properties":{}}""");
 
     public McpResponse Execute(McpRequest request) {
         // Clear our internal buffer
