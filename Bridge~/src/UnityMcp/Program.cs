@@ -25,10 +25,16 @@ builder.Logging.SetMinimumLevel(logLevel);
 // port, so multiple concurrent consumers of this bridge can each target a different editor.
 builder.Services.AddSingleton(new UnityConnectionPool());
 
+// Dynamic tool discovery (#243): editors advertise agent-facing tools via unity.meta.listTools;
+// the manager reconciles them into the server's tool collection whenever a connection (re)opens.
+builder.Services.AddSingleton<DynamicToolManager>();
+
 // Register MCP server with stdio transport and tools from this assembly
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 
-await builder.Build().RunAsync();
+var host = builder.Build();
+host.Services.GetRequiredService<DynamicToolManager>().Attach();
+await host.RunAsync();

@@ -37,6 +37,13 @@ public sealed class UnityConnectionPool : IAsyncDisposable {
     public bool IsConnected(int port) => m_Connections.TryGetValue(port, out var connection) && connection.IsConnected;
 
     /// <summary>
+    /// Raised after a pooled connection is (re)opened by <see cref="AcquireAsync"/>. Fires on
+    /// every reconnect — including after a domain reload, which is exactly when the editor's
+    /// dynamic tool set may have changed.
+    /// </summary>
+    public event Action<int, IUnityConnection>? ConnectionOpened;
+
+    /// <summary>
     /// Get the pooled connection for a port, opening it if it is not currently connected.
     /// Reuses healthy connections and reconnects dropped ones, isolated per port.
     /// </summary>
@@ -44,6 +51,7 @@ public sealed class UnityConnectionPool : IAsyncDisposable {
         var connection = GetConnection(port);
         if (!connection.IsConnected) {
             await connection.ConnectAsync(ct);
+            ConnectionOpened?.Invoke(port, connection);
         }
 
         return connection;

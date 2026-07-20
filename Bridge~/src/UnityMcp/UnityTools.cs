@@ -82,20 +82,10 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         return Success(JsonSerializer.Serialize(result, s_OutputJson));
     }
 
-    /// <summary>
-    /// Clear the Unity console log buffer.
-    /// </summary>
-    [McpServerTool(Name = "clear_logs"), Description("Clear the Unity console log buffer.")]
-    public async Task<CallToolResult> ClearLogs(
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-        var response = await unity!.SendAsync("unity.debug.clearLogs", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-        return Success("Log buffer cleared.");
-    }
+    // clear_logs, execute_menu_item, get_play_mode_state, set_play_mode, and
+    // get_invocation_result are served dynamically (#243): the editor advertises them via
+    // unity.meta.listTools and DynamicToolManager registers them on connect. Only tools with
+    // bridge-side logic (multi-step waits, formatting, discovery) stay native here.
 
     private const string SyncAndCompileDescription =
         "THE default 'make my code edits take effect' call. One coherent operation: waits for any import/compile " +
@@ -257,61 +247,6 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     }
 
     /// <summary>
-    /// Check if Unity Editor is in play mode, paused, or stopped.
-    /// </summary>
-    [McpServerTool(Name = "get_play_mode_state"), Description("Check if Unity Editor is in play mode, paused, or stopped.")]
-    public async Task<CallToolResult> GetPlayModeState(
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-        var response = await unity!.SendAsync("unity.editor.isPlaying", null, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        if (response.Result is not { } result) return Error("Unable to get play mode state.");
-
-        var isPlaying = result.TryGetProperty("isPlaying", out var p) && p.GetBoolean();
-        var isPaused = result.TryGetProperty("isPaused", out var pa) && pa.GetBoolean();
-
-        if (!isPlaying) return Success("Unity is in Edit mode (not playing).");
-        if (isPaused) return Success("Unity is in Play mode (PAUSED).");
-        return Success("Unity is in Play mode (running).");
-    }
-
-    /// <summary>
-    /// Set Unity play mode on or off.
-    /// </summary>
-    [McpServerTool(Name = "set_play_mode"), Description("Set Unity play mode state. Pass isPlaying=true to enter Play mode or false to return to Edit mode.")]
-    public async Task<CallToolResult> SetPlayMode(
-        [Description("Desired play mode state. true enters Play mode, false exits to Edit mode.")] bool isPlaying,
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-
-        var response = await unity!.SendAsync("unity.editor.setPlayMode", new { isPlaying }, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        if (response.Result is not { } result) {
-            return Error("Failed to set play mode.");
-        }
-
-        var changed = result.TryGetProperty("changed", out var changedElement) && changedElement.GetBoolean();
-        var currentIsPlaying = result.TryGetProperty("isPlaying", out var playingElement)
-            ? playingElement.GetBoolean()
-            : isPlaying;
-
-        if (changed) {
-            return Success(currentIsPlaying ? "Entered Play mode." : "Exited Play mode.");
-        }
-
-        var reason = result.TryGetProperty("reason", out var reasonElement) ? reasonElement.GetString() : "No state change";
-        return Success($"Play mode unchanged: {reason}");
-    }
-
-    /// <summary>
     /// Refresh the Unity Asset Database to detect external file changes, and report whether the refresh
     /// triggered a compile/import.
     /// </summary>
@@ -360,22 +295,6 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     }
 
     /// <summary>
-    /// Execute a Unity Editor menu item by its path.
-    /// </summary>
-    [McpServerTool(Name = "execute_menu_item"), Description("Execute a Unity Editor menu item by its path (e.g., 'File/Save Project', 'Edit/Project Settings...', 'Window/General/Console').")]
-    public async Task<CallToolResult> ExecuteMenuItem(
-        [Description("The menu item path to execute (e.g., 'File/Save Project')")] string menuItem,
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-        var response = await unity!.SendAsync("unity.editor.executeMenuItem", new { menuItem }, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-        return Success($"Executed menu item: {menuItem}");
-    }
-
-    /// <summary>
     /// Invoke any managed method in the Unity process via reflection.
     /// </summary>
     [McpServerTool(Name = "invoke_managed_method"), Description("Invoke any managed method in the Unity process via reflection. Supports static/instance methods, overload disambiguation, generic args, and JSON arguments. MAIN-THREAD EXECUTION: Unity runs queued commands on the main thread, ~10 per frame, so a long-running invoke stalls every other queued request to that editor - these calls are serialized, not parallel. ASYNC METHODS: Task- and UniTask-returning methods are awaited for up to waitMs (default 2000ms); if still running, the call returns {pending: true, invocationId} immediately (unblocking the editor main thread, which is exactly what lets main-thread-bound continuations complete) - poll get_invocation_result with that invocationId for the outcome. Returned strings preserve printable characters verbatim (no unicode escaping).")]
@@ -418,26 +337,6 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         }
 
         return Success(JsonSerializer.Serialize(result, s_OutputJson));
-    }
-
-    /// <summary>
-    /// Poll a backgrounded invoke_managed_method call.
-    /// </summary>
-    [McpServerTool(Name = "get_invocation_result"), Description("Poll the outcome of a backgrounded invoke_managed_method call. When invoke_managed_method returns {pending: true, invocationId}, the invoked Task kept running without blocking the editor; call this with that invocationId until status is 'completed' (includes returnValue) or the call reports the failure. Results are handed out once - the pending entry is removed on a completed/faulted poll, and unclaimed entries expire after ~1 hour or on domain reload.")]
-    public async Task<CallToolResult> GetInvocationResult(
-        [Description("The invocationId returned by a pending invoke_managed_method call")] string invocationId,
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-
-        var response = await unity!.SendAsync("unity.managed.getInvocationResult", new { invocationId }, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        return response.Result is { } result
-            ? Success(JsonSerializer.Serialize(result, s_OutputJson))
-            : Success("No result payload.");
     }
 
     /// <summary>
