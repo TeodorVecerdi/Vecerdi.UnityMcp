@@ -91,6 +91,7 @@ public sealed class McpEditorServer {
         m_Commands.Register(new SetPlayModeCommand());
         m_Commands.Register(new RefreshAssetsCommand());
         m_Commands.Register(new ExecuteMenuItemCommand());
+        m_Commands.Register(new GetEditorInfoCommand());
         m_Commands.Register(new InvokeManagedMethodCommand());
         m_Commands.Register(new GetInvocationResultCommand());
 
