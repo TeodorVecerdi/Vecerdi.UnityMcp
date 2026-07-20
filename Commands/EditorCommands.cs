@@ -43,8 +43,13 @@ public sealed class GetCompilationStatusCommand : IMcpCommandHandler {
 /// <summary>
 /// Command: unity.editor.isPlaying - Check if in play mode.
 /// </summary>
-public sealed class IsPlayingCommand : IMcpCommandHandler {
+public sealed class IsPlayingCommand : IMcpCommandHandler, IMcpToolProvider {
     public string Command => "unity.editor.isPlaying";
+
+    public McpToolDescriptor ToolDescriptor { get; } = new(
+        "get_play_mode_state",
+        "Check if the Unity Editor is in play mode, paused, or stopped. Returns {isPlaying, isPaused, isPlayingOrWillChangePlaymode}.",
+        """{"type":"object","properties":{}}""");
 
     public McpResponse Execute(McpRequest request) {
         return McpResponse.Ok(request.Id, new {
@@ -58,8 +63,13 @@ public sealed class IsPlayingCommand : IMcpCommandHandler {
 /// <summary>
 /// Command: unity.editor.setPlayMode - Enter or exit play mode.
 /// </summary>
-public sealed class SetPlayModeCommand : IMcpCommandHandler {
+public sealed class SetPlayModeCommand : IMcpCommandHandler, IMcpToolProvider {
     public string Command => "unity.editor.setPlayMode";
+
+    public McpToolDescriptor ToolDescriptor { get; } = new(
+        "set_play_mode",
+        "Set Unity play mode state. Pass isPlaying=true to enter Play mode or false to return to Edit mode. Returns {changed, isPlaying} (plus a reason when nothing changed); fails while the editor is compiling or updating.",
+        """{"type":"object","properties":{"isPlaying":{"type":"boolean","description":"Desired play mode state. true enters Play mode, false exits to Edit mode."}},"required":["isPlaying"]}""");
 
     public McpResponse Execute(McpRequest request) {
         if (!request.HasParam("isPlaying")) {
@@ -114,8 +124,13 @@ public sealed class RefreshAssetsCommand : IMcpCommandHandler {
 /// <summary>
 /// Command: unity.editor.executeMenuItem - Execute a Unity menu item by path.
 /// </summary>
-public sealed class ExecuteMenuItemCommand : IMcpCommandHandler {
+public sealed class ExecuteMenuItemCommand : IMcpCommandHandler, IMcpToolProvider {
     public string Command => "unity.editor.executeMenuItem";
+
+    public McpToolDescriptor ToolDescriptor { get; } = new(
+        "execute_menu_item",
+        "Execute a Unity Editor menu item by its path (e.g., 'File/Save Project', 'Edit/Project Settings...', 'Window/General/Console').",
+        """{"type":"object","properties":{"menuItem":{"type":"string","description":"The menu item path to execute (e.g., 'File/Save Project')"}},"required":["menuItem"]}""");
 
     public McpResponse Execute(McpRequest request) {
         var menuItem = request.GetParam<string>("menuItem");

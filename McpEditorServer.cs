@@ -93,6 +93,9 @@ public sealed class McpEditorServer {
         m_Commands.Register(new ExecuteMenuItemCommand());
         m_Commands.Register(new InvokeManagedMethodCommand());
         m_Commands.Register(new GetInvocationResultCommand());
+
+        // Tool discovery for the stdio bridge (#243) — must see every handler, register last.
+        m_Commands.Register(new ListToolsCommand(m_Commands));
         m_Commands.Register(new RunTestsCommand());
         m_Commands.Register(new GetTestRunStatusCommand());
         m_Commands.Register(new CancelTestRunCommand());

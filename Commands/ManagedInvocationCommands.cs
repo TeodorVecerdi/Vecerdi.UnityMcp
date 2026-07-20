@@ -55,8 +55,13 @@ internal static class PendingInvocationRegistry {
 /// Command: unity.managed.getInvocationResult - Poll a pending invocation started by
 /// unity.managed.invokeMethod (todo #387).
 /// </summary>
-public sealed class GetInvocationResultCommand : IMcpCommandHandler {
+public sealed class GetInvocationResultCommand : IMcpCommandHandler, IMcpToolProvider {
     public string Command => "unity.managed.getInvocationResult";
+
+    public McpToolDescriptor ToolDescriptor { get; } = new(
+        "get_invocation_result",
+        "Poll the outcome of a backgrounded invoke_managed_method call. When invoke_managed_method returns {pending: true, invocationId}, the invoked Task kept running without blocking the editor; call this with that invocationId until status is 'completed' (includes returnValue) or the call reports the failure. Results are handed out once - the pending entry is removed on a completed/faulted poll, and unclaimed entries expire after ~1 hour or on domain reload.",
+        """{"type":"object","properties":{"invocationId":{"type":"string","description":"The invocationId returned by a pending invoke_managed_method call"}},"required":["invocationId"]}""");
 
     public McpResponse Execute(McpRequest request) {
         var invocationId = request.GetParam<string>("invocationId");

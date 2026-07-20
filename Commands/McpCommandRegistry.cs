@@ -16,6 +16,23 @@ public interface IMcpCommandHandler {
 }
 
 /// <summary>
+/// How a command presents itself as an agent-facing MCP tool (todo #243). The stdio bridge
+/// fetches these via <c>unity.meta.listTools</c> when it connects and serves them as dynamic
+/// tools, so adding a tool needs no bridge rebuild. The bridge injects its own <c>port</c>
+/// parameter into every schema; the response the agent sees is this command's raw result JSON
+/// (no bridge-side formatting) — write results to be self-describing.
+/// </summary>
+/// <param name="Name">Agent-facing tool name (snake_case, e.g. "set_play_mode").</param>
+/// <param name="Description">Tool description shown to agents; carries the full usage contract.</param>
+/// <param name="InputSchemaJson">JSON Schema object for the command's parameters (excluding the bridge's port).</param>
+public sealed record McpToolDescriptor(string Name, string Description, string InputSchemaJson);
+
+/// <summary>Implemented by command handlers that should be discoverable as MCP tools.</summary>
+public interface IMcpToolProvider {
+    McpToolDescriptor ToolDescriptor { get; }
+}
+
+/// <summary>
 /// Registry and dispatcher for MCP command handlers.
 /// </summary>
 public sealed class McpCommandRegistry {
@@ -38,6 +55,9 @@ public sealed class McpCommandRegistry {
 
     /// <summary>Get all registered command names.</summary>
     public IEnumerable<string> GetCommands() => m_Handlers.Keys;
+
+    /// <summary>Get all registered handlers (for tool discovery).</summary>
+    public IEnumerable<IMcpCommandHandler> GetHandlers() => m_Handlers.Values;
 
     /// <summary>Execute a command request.</summary>
     public McpResponse Execute(McpRequest request) {
