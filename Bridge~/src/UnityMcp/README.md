@@ -100,7 +100,6 @@ Dynamic (editor-advertised; the live set is whatever the connected editor expose
 
 | Tool | Description |
 |------|-------------|
-| `get_editor_info` | Unity version, project name/path, build target, play/compile state |
 | `get_play_mode_state` / `set_play_mode` | Query / enter / exit play mode |
 | `execute_menu_item` | Execute a menu item by path |
 | `clear_logs` | Clear the log buffer |
