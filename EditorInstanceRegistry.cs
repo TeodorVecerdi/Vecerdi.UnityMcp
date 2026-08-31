@@ -29,6 +29,27 @@ public sealed class EditorInstance {
 
     [JsonPropertyName("startTime")]
     public DateTime StartTime { get; set; }
+
+    /// <summary>One of <see cref="EditorInstanceState"/>. Lets the stdio bridge tell a domain reload from a closed editor.</summary>
+    [JsonPropertyName("state")]
+    public string State { get; set; } = EditorInstanceState.Ready;
+
+    [JsonPropertyName("stateChangedAt")]
+    public DateTime StateChangedAt { get; set; }
+
+    /// <summary>When the most recent script compilation started (UTC). Survives the reload that follows a successful compile.</summary>
+    [JsonPropertyName("compilationStartedAt")]
+    public DateTime? CompilationStartedAt { get; set; }
+}
+
+/// <summary>
+/// Lifecycle states an editor advertises in the discovery file. The entry itself stays put across a domain reload;
+/// only quitting removes it, so a missing entry really does mean "no editor".
+/// </summary>
+public static class EditorInstanceState {
+    public const string Ready = "ready";
+    public const string Compiling = "compiling";
+    public const string Reloading = "reloading";
 }
 
 /// <summary>
@@ -61,18 +82,25 @@ public static class EditorInstanceRegistry {
     public static int RegisterInstance(ILogger? logger = null) {
         var instances = LoadInstances(logger);
 
-        // Clean up stale instances (processes that no longer exist, or duplicate project paths)
+        // The entry this editor wrote before its last domain reload (same project path). Re-registering replaces it,
+        // but we keep its port and compile timestamp so the bridge sees the same editor come back, not a new one.
         var currentProjectPath = Application.dataPath.Replace("/Assets", "");
+        var previous = instances.FirstOrDefault(i => string.Equals(i.ProjectPath, currentProjectPath, StringComparison.OrdinalIgnoreCase));
+
+        // Clean up stale instances (processes that no longer exist, or duplicate project paths)
         instances = CleanupStaleInstances(instances, currentProjectPath, logger);
 
-        // Find an available port
+        // Find an available port, preferring the one this editor used before the reload
         var usedPorts = instances.Select(i => i.Port).ToHashSet();
         var port = -1;
 
-        for (var p = MinPort; p <= MaxPort; p++) {
+        if (previous is { Port: >= MinPort and <= MaxPort } && !usedPorts.Contains(previous.Port) && IsPortAvailable(previous.Port)) {
+            port = previous.Port;
+        }
+
+        for (var p = MinPort; port == -1 && p <= MaxPort; p++) {
             if (!usedPorts.Contains(p) && IsPortAvailable(p)) {
                 port = p;
-                break;
             }
         }
 
@@ -88,6 +116,9 @@ public static class EditorInstanceRegistry {
             ProjectName = Path.GetFileName(currentProjectPath),
             ProcessId = Process.GetCurrentProcess().Id,
             StartTime = DateTime.UtcNow,
+            State = EditorInstanceState.Ready,
+            StateChangedAt = DateTime.UtcNow,
+            CompilationStartedAt = previous?.CompilationStartedAt,
         };
 
         instances.Add(instance);
@@ -111,6 +142,31 @@ public static class EditorInstanceRegistry {
             SaveInstances(instances, logger);
             logger?.LogDebug("Unregistered instance on port {Port}", port);
         }
+    }
+
+    /// <summary>
+    /// Advertises a lifecycle state for this editor's entry without touching its port or identity.
+    /// </summary>
+    /// <param name="compilationStartedAt">When set, also records the start of the current script compilation.</param>
+    /// <param name="clearCompilationStartedAt">Forget the recorded compilation start (a reload that no compile led to).</param>
+    public static void UpdateState(int port, string state, DateTime? compilationStartedAt = null, bool clearCompilationStartedAt = false, ILogger? logger = null) {
+        var instances = LoadInstances(logger);
+        var pid = Process.GetCurrentProcess().Id;
+        var instance = instances.FirstOrDefault(i => i.Port == port && i.ProcessId == pid);
+        if (instance is null) {
+            return;
+        }
+
+        instance.State = state;
+        instance.StateChangedAt = DateTime.UtcNow;
+        if (compilationStartedAt is { } startedAt) {
+            instance.CompilationStartedAt = startedAt;
+        } else if (clearCompilationStartedAt) {
+            instance.CompilationStartedAt = null;
+        }
+
+        SaveInstances(instances, logger);
+        logger?.LogDebug("Instance on port {Port} is now {State}", port, state);
     }
 
     /// <summary>
