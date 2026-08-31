@@ -42,15 +42,25 @@ public static class EditorAvailability {
         var deadline = DateTime.UtcNow + ReloadWait;
         DateTime? readySince = null;
         var sawReload = false;
+        var missingReads = 0;
         EditorInstance? editor;
 
         while (true) {
             editor = FindEditor(port);
             if (editor is null) {
+                // One missing read is not proof: the entry is momentarily absent while the editor re-registers
+                // after a reload, and a torn read looks the same. Two in a row is.
+                if (++missingReads < 2 && DateTime.UtcNow < deadline) {
+                    await Task.Delay(PollInterval, ct);
+                    continue;
+                }
+
                 return (null, sawReload
                     ? $"Unity Editor on port {port} was closed while reloading the script domain. Use 'list_editors' to see the running editors."
                     : $"No Unity Editor is registered on port {port} - it has probably been closed. Use 'list_editors' to see the running editors.");
             }
+
+            missingReads = 0;
 
             if (editor.IsReloading || editor.IsCompiling) {
                 // Reloading, or compiling with a reload imminent. Keep waiting; the connect is retried each poll.

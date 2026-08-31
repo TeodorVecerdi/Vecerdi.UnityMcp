@@ -133,6 +133,25 @@ public sealed class EditorAvailabilityTests : IDisposable {
     }
 
     [Fact]
+    public async Task EntryMomentarilyMissing_IsNotTreatedAsClosed() {
+        // Right after a reload the editor re-registers; for a moment the file has no entry (or a torn read has none).
+        var reads = 0;
+        var serverUp = false;
+        EditorAvailability.FindEditor = _ => {
+            reads++;
+            if (reads == 1) return null;
+            serverUp = true;
+            return Editor(EditorInstanceState.Ready);
+        };
+        var (pool, _) = PoolGatedBy(() => serverUp);
+
+        var (connection, error) = await EditorAvailability.AcquireAsync(pool, Port, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.True(connection!.IsConnected);
+    }
+
+    [Fact]
     public async Task EditorClosedMidReload_ReportsClosedInsteadOfWaitingOut() {
         EditorAvailability.ReloadWait = TimeSpan.FromSeconds(30);
         var reads = 0;
