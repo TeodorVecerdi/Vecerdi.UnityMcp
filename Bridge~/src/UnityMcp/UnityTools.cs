@@ -193,7 +193,6 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         // for them. Its per-assembly errors may already be in the buffer by now; that is exactly why the arrival
         // time would be the wrong marker.
         var marker = compileStartedAt;
-        var joinedAgo = DateTimeOffset.UtcNow - compileStartedAt;
 
         var settled = await WaitForCompilationIdleAsync(unity, TimeSpan.FromSeconds(120), ct);
 
@@ -222,8 +221,8 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         }
 
         var note = refreshTriggeredMore
-            ? $"Joined a compile that was already running (started {joinedAgo.TotalSeconds:F0}s before this call); newer edits triggered a further compile."
-            : $"Joined a compile that was already running (started {joinedAgo.TotalSeconds:F0}s before this call); no edits were newer than it, so no second compile was needed.";
+            ? "Joined a compile that was already running; newer edits triggered a further compile."
+            : "Joined a compile that was already running; no edits were newer than it, so no second compile was needed.";
         return await BuildFreshDiagnosticsResultAsync(unity, marker, settled, ct, note);
     }
 
