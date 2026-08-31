@@ -111,7 +111,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
 
         var (unity, connectionError) = await EditorAvailability.AcquireAsync(pool, targetPort, ct);
         if (connectionError is not null) return Error(connectionError);
-        return await RunSyncAndCompileAsync(unity!, entryAtArrival, ct);
+        return await RunSyncAndCompileAsync(unity!, entryAtArrival, () => EditorDiscovery.FindEditorByPort(targetPort), ct);
     }
 
     /// <summary>
@@ -121,7 +121,10 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// diagnostics produced by this compile are returned.
     /// </summary>
     /// <param name="entryAtArrival">The editor's discovery entry as it was when the call arrived, before any connection wait; used to join a compile already in flight.</param>
-    internal static async Task<CallToolResult> RunSyncAndCompileAsync(IUnityConnection unity, EditorInstance? entryAtArrival, CancellationToken ct) {
+    /// <param name="registryProbe">Re-reads the entry later, to notice a compile that started while we were still draining.</param>
+    internal static async Task<CallToolResult> RunSyncAndCompileAsync(IUnityConnection unity, EditorInstance? entryAtArrival, Func<EditorInstance?> registryProbe, CancellationToken ct) {
+        var arrivedAt = DateTimeOffset.UtcNow;
+
         // Step 0: Was a compile we did not start already running when the call arrived (the user focused the editor
         // a moment ago, say)? If the editor advertised when it started, join it instead of paying for a second one.
         if (DetectInFlightCompile(entryAtArrival) is { } inFlight) {
@@ -131,6 +134,12 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         // Drain any import/compile already in flight whose start we cannot place (older plugin, or a bare asset
         // import), so our forced recompile does not collide with it. Best-effort; a timeout here is not fatal.
         await WaitForCompilationIdleAsync(unity, TimeSpan.FromSeconds(60), ct);
+
+        // A compile that began after we arrived (the editor got focus while we were draining) is just as joinable:
+        // nothing has been sent yet, and its start time is on record even though the editor is idle again by now.
+        if (registryProbe()?.CompilationStartedAt is { } startedMeanwhile && startedMeanwhile > arrivedAt) {
+            return await JoinInFlightCompileAsync(unity, startedMeanwhile, ct);
+        }
 
         // Step 1: Mark the buffer position. Only diagnostics stamped strictly after this are "fresh".
         var marker = DateTimeOffset.UtcNow;
