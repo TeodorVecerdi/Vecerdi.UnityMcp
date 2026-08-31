@@ -65,7 +65,7 @@ public sealed class SyncAndCompileTests {
             _ => Ok(),
         });
 
-        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Compiling, compileStartedAt), CancellationToken.None);
+        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Compiling, compileStartedAt), () => null, CancellationToken.None);
 
         var text = TextOf(result);
         Assert.True(result.IsError);
@@ -99,7 +99,7 @@ public sealed class SyncAndCompileTests {
             }
         });
 
-        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Reloading, compileStartedAt), CancellationToken.None);
+        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Reloading, compileStartedAt), () => null, CancellationToken.None);
 
         var text = TextOf(result);
         Assert.False(result.IsError ?? false);
@@ -117,10 +117,32 @@ public sealed class SyncAndCompileTests {
             _ => Ok(),
         });
 
-        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Ready, null), CancellationToken.None);
+        var stale = Entry(EditorInstanceState.Ready, DateTimeOffset.UtcNow.AddMinutes(-10));
+        var result = await UnityTools.RunSyncAndCompileAsync(editor, stale, () => stale, CancellationToken.None);
 
         Assert.False(result.IsError ?? false);
         Assert.Contains("unity.editor.recompile", commands);
         Assert.DoesNotContain("Joined", TextOf(result));
+    }
+
+    [Fact]
+    public async Task CompileThatStartsDuringTheDrain_IsJoinedToo() {
+        // Idle at arrival; a compile the user triggered starts and finishes while we drain, leaving its start on record.
+        var statusPolls = 0;
+        var (editor, commands) = Editor(command => command switch {
+            "unity.editor.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: ++statusPolls <= 1, isUpdating: false),
+            "unity.debug.getLogs" => ScriptedUnityConnection.LogsResponse(),
+            _ => Ok(),
+        });
+
+        var result = await UnityTools.RunSyncAndCompileAsync(
+            editor,
+            Entry(EditorInstanceState.Ready, null),
+            () => Entry(EditorInstanceState.Ready, DateTimeOffset.UtcNow.AddSeconds(1)),
+            CancellationToken.None);
+
+        Assert.False(result.IsError ?? false);
+        Assert.Contains("Joined a compile that was already running", TextOf(result));
+        Assert.DoesNotContain("unity.editor.recompile", commands);
     }
 }
