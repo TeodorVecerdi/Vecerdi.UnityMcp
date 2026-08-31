@@ -15,16 +15,19 @@ public sealed class EditorAvailabilityTests : IDisposable {
     private readonly Func<int, EditorInstance?> m_OriginalFindEditor = EditorAvailability.FindEditor;
     private readonly TimeSpan m_OriginalWait = EditorAvailability.ReloadWait;
     private readonly TimeSpan m_OriginalPoll = EditorAvailability.PollInterval;
+    private readonly TimeSpan m_OriginalGrace = EditorAvailability.ReadyGrace;
 
     public EditorAvailabilityTests() {
         EditorAvailability.PollInterval = TimeSpan.FromMilliseconds(10);
         EditorAvailability.ReloadWait = TimeSpan.FromSeconds(5);
+        EditorAvailability.ReadyGrace = TimeSpan.FromMilliseconds(80);
     }
 
     public void Dispose() {
         EditorAvailability.FindEditor = m_OriginalFindEditor;
         EditorAvailability.ReloadWait = m_OriginalWait;
         EditorAvailability.PollInterval = m_OriginalPoll;
+        EditorAvailability.ReadyGrace = m_OriginalGrace;
     }
 
     private static EditorInstance Editor(string state, DateTimeOffset? changedAt = null) => new() {
@@ -113,7 +116,7 @@ public sealed class EditorAvailabilityTests : IDisposable {
         var (connection, error) = await EditorAvailability.AcquireAsync(pool, Port, CancellationToken.None);
 
         Assert.Null(connection);
-        Assert.Contains("reloading the script domain", error);
+        Assert.Contains("has been reloading for", error);
         Assert.Contains("42s", error);
         Assert.DoesNotContain("Make sure the Editor is running", error);
     }
@@ -145,7 +148,7 @@ public sealed class EditorAvailabilityTests : IDisposable {
     [Fact]
     public async Task AliveButUnreachable_ReportsPluginProblemWithState() {
         EditorAvailability.FindEditor = _ => Editor(EditorInstanceState.Ready);
-        var (pool, _) = PoolGatedBy(() => false);
+        var (pool, created) = PoolGatedBy(() => false);
 
         var (connection, error) = await EditorAvailability.AcquireAsync(pool, Port, CancellationToken.None);
 
@@ -153,5 +156,19 @@ public sealed class EditorAvailabilityTests : IDisposable {
         Assert.Contains("connection refused", error);
         Assert.Contains("state 'ready'", error);
         Assert.Contains("MCP plugin", error);
+        Assert.True(created[Port].ConnectCount >= 3, "should keep retrying the connect during the ready grace period");
+    }
+
+    [Fact]
+    public async Task ReadyButListenerNotUpYet_ConnectsOnceItIs() {
+        // The entry is rewritten as 'ready' a beat before the server accepts connections again.
+        var attempts = 0;
+        EditorAvailability.FindEditor = _ => Editor(EditorInstanceState.Ready);
+        var (pool, _) = PoolGatedBy(() => ++attempts >= 3);
+
+        var (connection, error) = await EditorAvailability.AcquireAsync(pool, Port, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.True(connection!.IsConnected);
     }
 }
