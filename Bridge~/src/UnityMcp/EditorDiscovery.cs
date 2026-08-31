@@ -87,18 +87,25 @@ public static class EditorDiscovery {
     /// Gets all available Unity Editor instances.
     /// </summary>
     public static List<EditorInstance> GetAvailableEditors() {
-        try {
-            if (!File.Exists(s_DiscoveryFilePath)) {
+        // The editor rewrites this file at every state change (and renames it into place), but a read can still
+        // land mid-replace or on a locked file. A failed read is retried briefly rather than reported as "no
+        // editors", which callers would act on.
+        for (var attempt = 0; ; attempt++) {
+            try {
+                if (!File.Exists(s_DiscoveryFilePath)) {
+                    return [];
+                }
+
+                var json = File.ReadAllText(s_DiscoveryFilePath);
+                var instances = JsonSerializer.Deserialize<List<EditorInstance>>(json, s_JsonOptions) ?? [];
+
+                // Filter to only alive instances
+                return instances.Where(i => i.IsAlive).ToList();
+            } catch when (attempt < 3) {
+                Thread.Sleep(25);
+            } catch {
                 return [];
             }
-
-            var json = File.ReadAllText(s_DiscoveryFilePath);
-            var instances = JsonSerializer.Deserialize<List<EditorInstance>>(json, s_JsonOptions) ?? [];
-
-            // Filter to only alive instances
-            return instances.Where(i => i.IsAlive).ToList();
-        } catch {
-            return [];
         }
     }
 

@@ -87,8 +87,9 @@ public static class EditorInstanceRegistry {
         var currentProjectPath = Application.dataPath.Replace("/Assets", "");
         var previous = instances.FirstOrDefault(i => string.Equals(i.ProjectPath, currentProjectPath, StringComparison.OrdinalIgnoreCase));
 
-        // Clean up stale instances (processes that no longer exist, or duplicate project paths)
-        instances = CleanupStaleInstances(instances, currentProjectPath, logger);
+        // Clean up stale instances (processes that no longer exist, or duplicate project paths). Not saved here:
+        // the file must never be observed without this editor's entry, so the one write happens below.
+        instances = CleanupStaleInstances(instances, currentProjectPath, logger, save: false);
 
         // Find an available port, preferring the one this editor used before the reload
         var usedPorts = instances.Select(i => i.Port).ToHashSet();
@@ -198,14 +199,22 @@ public static class EditorInstanceRegistry {
                 Directory.CreateDirectory(directory);
             }
 
+            // Write-then-rename so a concurrent reader (the stdio bridge polls this file around reloads) never
+            // sees a truncated document.
             var json = JsonSerializer.Serialize(instances, s_JsonOptions);
-            File.WriteAllText(s_DiscoveryFilePath, json);
+            var tempPath = s_DiscoveryFilePath + "." + Process.GetCurrentProcess().Id + ".tmp";
+            File.WriteAllText(tempPath, json);
+            if (File.Exists(s_DiscoveryFilePath)) {
+                File.Replace(tempPath, s_DiscoveryFilePath, destinationBackupFileName: null);
+            } else {
+                File.Move(tempPath, s_DiscoveryFilePath);
+            }
         } catch (Exception ex) {
             logger?.LogWarning(ex, "Failed to save discovery file");
         }
     }
 
-    private static List<EditorInstance> CleanupStaleInstances(List<EditorInstance> instances, string? currentProjectPath, ILogger? logger) {
+    private static List<EditorInstance> CleanupStaleInstances(List<EditorInstance> instances, string? currentProjectPath, ILogger? logger, bool save = true) {
         var validInstances = new List<EditorInstance>();
 
         foreach (var instance in instances) {
@@ -229,7 +238,7 @@ public static class EditorInstanceRegistry {
         }
 
         // Save if we removed any stale instances
-        if (validInstances.Count != instances.Count) {
+        if (save && validInstances.Count != instances.Count) {
             SaveInstances(validInstances, logger);
         }
 
