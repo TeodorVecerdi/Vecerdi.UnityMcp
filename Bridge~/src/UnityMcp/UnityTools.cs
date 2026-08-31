@@ -15,8 +15,8 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     private const string PortParamDescription =
         "Optional Unity Editor port. Omitted: targets the 'select_editor' default, else the only running editor; " +
         "required when several run and no default is set ('list_editors' shows ports). Editor state (default " +
-        "selection, latest test run) is per-editor. Calls to an editor mid-domain-reload fail with a connect " +
-        "error - expected; retry after 'sync_and_compile' returns.";
+        "selection, latest test run) is per-editor. A call that arrives while the editor is reloading the script " +
+        "domain waits for it to come back (up to a minute) before sending.";
 
     // Non-indented output: System.Text.Json's default encoder escapes '+', '<', '>', '&' and all non-ASCII to
     // \uXXXX, which mangles printable characters in returned strings. The relaxed encoder emits them verbatim.
@@ -102,7 +102,9 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     ) {
         var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
         if (connectionError is not null) return connectionError;
-        return await RunSyncAndCompileAsync(unity!, ct);
+
+        var targetPort = EditorDiscovery.TryGetPort(unity!.CurrentUri);
+        return await RunSyncAndCompileAsync(unity, () => targetPort is { } p ? EditorDiscovery.FindEditorByPort(p) : null, ct);
     }
 
     /// <summary>
@@ -111,9 +113,16 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// drains any pending import/compile before starting its own, and marks the log-buffer position so only
     /// diagnostics produced by this compile are returned.
     /// </summary>
-    private static async Task<CallToolResult> RunSyncAndCompileAsync(IUnityConnection unity, CancellationToken ct) {
-        // Step 0: Drain any import/compile already in flight (e.g. a prior refresh_assets is still building),
-        // so our forced recompile does not collide with it. Best-effort; a timeout here is not fatal.
+    /// <param name="registryProbe">Reads the editor's current discovery entry; used to join a compile already in flight.</param>
+    internal static async Task<CallToolResult> RunSyncAndCompileAsync(IUnityConnection unity, Func<EditorInstance?> registryProbe, CancellationToken ct) {
+        // Step 0: Is a compile we did not start already running (the user focused the editor a moment ago, say)?
+        // If the editor advertised when it started, join it instead of paying for a second one.
+        if (DetectInFlightCompile(registryProbe()) is { } inFlight) {
+            return await JoinInFlightCompileAsync(unity, inFlight, ct);
+        }
+
+        // Drain any import/compile already in flight whose start we cannot place (older plugin, or a bare asset
+        // import), so our forced recompile does not collide with it. Best-effort; a timeout here is not fatal.
         await WaitForCompilationIdleAsync(unity, TimeSpan.FromSeconds(60), ct);
 
         // Step 1: Mark the buffer position. Only diagnostics stamped strictly after this are "fresh".
@@ -150,6 +159,59 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     }
 
     /// <summary>
+    /// A compile that was already running when a <c>sync_and_compile</c> call arrived, as far as the discovery
+    /// entry can tell: the editor is <c>compiling</c>, or <c>reloading</c> because of a compile, and it recorded
+    /// when that compile started. Anything less (older plugin, a bare asset import, a reload no compile caused)
+    /// yields null and the caller falls back to draining and forcing its own compile.
+    /// </summary>
+    internal static DateTimeOffset? DetectInFlightCompile(EditorInstance? entry) =>
+        entry is { CompilationStartedAt: { } startedAt } && (entry.IsCompiling || entry.IsReloading) ? startedAt : null;
+
+    /// <summary>
+    /// Ride a compile that is already in flight instead of starting another: wait for it to settle, ask the asset
+    /// database whether anything changed since it began (the editor's own dirty check), compile again only if that
+    /// refresh kicked one off, and report every diagnostic since the original compile started.
+    /// </summary>
+    private static async Task<CallToolResult> JoinInFlightCompileAsync(IUnityConnection unity, DateTimeOffset compileStartedAt, CancellationToken ct) {
+        // The marker is the in-flight compile's own start, so its errors count as fresh even though we did not ask
+        // for them. Its per-assembly errors may already be in the buffer by now; that is exactly why the arrival
+        // time would be the wrong marker.
+        var marker = compileStartedAt;
+        var joinedAgo = DateTimeOffset.UtcNow - compileStartedAt;
+
+        var settled = await WaitForCompilationIdleAsync(unity, TimeSpan.FromSeconds(120), ct);
+
+        // Anything edited after that compile began is still unimported. Refresh; if Unity finds work, a second
+        // compile (and possibly a reload) follows and the marker covers it too.
+        var refreshTriggeredMore = true;
+        try {
+            var refreshResponse = await unity.SendAsync("unity.editor.refreshAssets", null, ct);
+            if (refreshResponse.Success) {
+                await Task.Delay(250, ct);
+                refreshTriggeredMore = await IsCompilingOrUpdatingAsync(unity, ct) != false;
+            }
+        } catch {
+            // Connection dropped: the refresh itself started a reload.
+        }
+
+        if (refreshTriggeredMore) {
+            await Task.Delay(1000, ct);
+            var reconnected = await unity.WaitForConnectionAsync(TimeSpan.FromSeconds(60), TimeSpan.FromMilliseconds(500), ct);
+            if (!reconnected) {
+                return Error("Timed out waiting for Unity to reconnect after recompile. The Editor may still be compiling or may have encountered a fatal error.");
+            }
+
+            await Task.Delay(500, ct);
+            settled = await WaitForCompilationIdleAsync(unity, TimeSpan.FromSeconds(120), ct);
+        }
+
+        var note = refreshTriggeredMore
+            ? $"Joined a compile that was already running (started {joinedAgo.TotalSeconds:F0}s before this call); newer edits triggered a further compile."
+            : $"Joined a compile that was already running (started {joinedAgo.TotalSeconds:F0}s before this call); no edits were newer than it, so no second compile was needed.";
+        return await BuildFreshDiagnosticsResultAsync(unity, marker, settled, ct, note);
+    }
+
+    /// <summary>
     /// Poll compilation status until Unity reports neither compiling nor updating, surviving disconnects.
     /// Returns true when it settled, false on timeout.
     /// </summary>
@@ -177,7 +239,8 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// Fetch error logs, keep only those stamped after <paramref name="marker"/>, parse them into structured
     /// compiler diagnostics, and render the result. Success when no fresh errors; Error otherwise.
     /// </summary>
-    internal static async Task<CallToolResult> BuildFreshDiagnosticsResultAsync(IUnityConnection unity, DateTimeOffset marker, bool settled, CancellationToken ct) {
+    internal static async Task<CallToolResult> BuildFreshDiagnosticsResultAsync(IUnityConnection unity, DateTimeOffset marker, bool settled, CancellationToken ct, string? note = null) {
+        var prefix = note is null ? "" : note + "\n\n";
         UnityResponse logsResponse;
         try {
             logsResponse = await unity.SendAsync("unity.debug.getLogs", new { count = 200, minLevel = "error" }, ct);
@@ -204,12 +267,13 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         }
 
         if (diagnostics.Count == 0 && otherErrors.Count == 0) {
-            return Success(settled
+            return Success(prefix + (settled
                 ? "Compilation completed successfully with no errors."
-                : "Compilation reported no new errors, but did not confirm idle within the timeout - verify in the Unity Editor if in doubt.");
+                : "Compilation reported no new errors, but did not confirm idle within the timeout - verify in the Unity Editor if in doubt."));
         }
 
         var sb = new StringBuilder();
+        sb.Append(prefix);
         var total = diagnostics.Count + otherErrors.Count;
         sb.AppendLine($"Compilation FAILED with {total} new error(s):");
         sb.AppendLine();
@@ -470,6 +534,10 @@ public sealed class UnityTools(UnityConnectionPool pool) {
             sb.AppendLine($"    Project: {editor.ProjectName}");
             sb.AppendLine($"    Path: {editor.ProjectPath}");
             sb.AppendLine($"    PID: {editor.ProcessId}");
+            if (editor.IsReloading || editor.IsCompiling) {
+                var since = editor.StateChangedAt is { } at ? $" for {(DateTimeOffset.UtcNow - at).TotalSeconds:F0}s" : "";
+                sb.AppendLine($"    State: {editor.State}{since}");
+            }
             sb.AppendLine();
         }
 
@@ -514,15 +582,8 @@ public sealed class UnityTools(UnityConnectionPool pool) {
             return (null, Error(resolveError));
         }
 
-        var targetPort = resolution.Port!.Value;
-        try {
-            var connection = await pool.AcquireAsync(targetPort, ct);
-            return (connection, null);
-        } catch (Exception ex) {
-            return (null, Error(
-                $"Failed to connect to Unity Editor on port {targetPort}: {ex.Message}\n\n" +
-                "Make sure the Editor is running and the MCP plugin is active."));
-        }
+        var (connection, connectionError) = await EditorAvailability.AcquireAsync(pool, resolution.Port!.Value, ct);
+        return connectionError is not null ? (null, Error(connectionError)) : (connection, null);
     }
 
     private static CallToolResult? ToErrorResult(UnityResponse response) {
