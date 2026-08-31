@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using UnityEditor;
+using UnityEditor.Compilation;
 using Vecerdi.Extensions.Logging;
 using Vecerdi.UnityMcp.Commands;
 using Vecerdi.UnityMcp.Protocol;
@@ -32,6 +33,8 @@ public sealed class McpEditorServer {
     private bool m_IsRunning;
     private int m_Port;
     private int m_ConnectionCount;
+    private string m_AdvertisedState = EditorInstanceState.Ready;
+    private int m_CompilationErrorCount;
 
     private static readonly JsonSerializerOptions s_JsonOptions = new() {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -54,11 +57,21 @@ public sealed class McpEditorServer {
         // This ensures the server starts even when Unity doesn't have focus
         EditorApplication.update += OnEditorUpdate;
 
-        // Cleanup on domain unload
+        // A domain reload only suspends the server: the socket goes down but the discovery entry stays, flagged
+        // 'reloading', so the stdio bridge can tell "wait a moment" from "the editor is gone". Quitting unregisters.
         AssemblyReloadEvents.beforeAssemblyReload += () => {
             s_Instance?.m_LogBuffer.Dispose();
-            s_Instance?.Stop();
+            s_Instance?.Suspend();
         };
+        EditorApplication.quitting += () => s_Instance?.Stop();
+
+        // Advertise script compilation with its start time; the bridge uses it as the diagnostics marker when it
+        // joins a compile it did not trigger. A compile with errors ends in 'ready' (no reload follows); a clean one
+        // stays 'compiling' until beforeAssemblyReload turns it into 'reloading', so a reloading entry only carries
+        // a compilation start when that compile is what caused the reload.
+        CompilationPipeline.compilationStarted += _ => s_Instance?.OnCompilationStarted();
+        CompilationPipeline.assemblyCompilationFinished += (_, messages) => s_Instance?.OnAssemblyCompiled(messages);
+        CompilationPipeline.compilationFinished += _ => s_Instance?.OnCompilationFinished();
     }
 
     private static bool s_StartupAttempted;
@@ -138,21 +151,59 @@ public sealed class McpEditorServer {
         }
     }
 
+    /// <summary>Stops the server and removes this editor from the discovery file. For quitting.</summary>
     public void Stop() {
         if (!m_IsRunning) return;
 
         m_Logger.LogDebug("Stopping server...");
-
-        // Unregister from discovery file
         EditorInstanceRegistry.UnregisterInstance(m_Port, m_Logger);
+        StopServer();
+        m_Logger.LogDebug("Server stopped");
+    }
 
+    /// <summary>Stops the server for a domain reload, leaving the discovery entry in place as 'reloading'.</summary>
+    private void Suspend() {
+        if (!m_IsRunning) return;
+
+        m_Logger.LogDebug("Suspending server for domain reload...");
+        var reloadFollowsCompilation = m_AdvertisedState == EditorInstanceState.Compiling;
+        AdvertiseState(EditorInstanceState.Reloading, clearCompilationStartedAt: !reloadFollowsCompilation);
+        StopServer();
+    }
+
+    private void OnCompilationStarted() {
+        m_CompilationErrorCount = 0;
+        AdvertiseState(EditorInstanceState.Compiling, DateTime.UtcNow);
+    }
+
+    private void OnAssemblyCompiled(CompilerMessage[] messages) {
+        foreach (var message in messages) {
+            if (message.type == CompilerMessageType.Error) {
+                m_CompilationErrorCount++;
+            }
+        }
+    }
+
+    private void OnCompilationFinished() {
+        // Errors mean no reload is coming, so the editor is usable again right away. A clean compile is followed
+        // by a domain reload, which Suspend advertises; staying 'compiling' until then keeps the two states honest.
+        if (m_CompilationErrorCount > 0) {
+            AdvertiseState(EditorInstanceState.Ready);
+        }
+    }
+
+    private void StopServer() {
         m_Server?.Stop();
         m_Server = null;
 
         m_IsRunning = false;
         m_ConnectionCount = 0;
+    }
 
-        m_Logger.LogDebug("Server stopped");
+    private void AdvertiseState(string state, DateTime? compilationStartedAt = null, bool clearCompilationStartedAt = false) {
+        if (!m_IsRunning) return;
+        m_AdvertisedState = state;
+        EditorInstanceRegistry.UpdateState(m_Port, state, compilationStartedAt, clearCompilationStartedAt, m_Logger);
     }
 
     internal void OnClientConnected() {

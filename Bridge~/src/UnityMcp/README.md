@@ -113,8 +113,16 @@ Dynamic (editor-advertised; the live set is whatever the connected editor expose
   into `file(line,col): severity CODE: message`). Do **not** chain
   `refresh_assets` then a manual recompile - that race is the footgun this tool removes.
 - **Domain-reload contract:** `sync_and_compile` blocks (up to ~3 min)
-  and drives a domain reload; any *other* call to the same editor mid-reload fails
-  with a connect error. Expect it, and retry after the call returns.
+  and drives a domain reload. The editor keeps its discovery entry through the reload,
+  flagged `reloading`, so any *other* call that arrives mid-reload waits for the editor to
+  come back (up to a minute) and then sends, instead of failing with a connect error. A
+  request that was already in flight when the socket dropped fails with a message naming
+  the reload; treat it as "unknown whether it ran" for non-idempotent commands.
+- **Joining a compile you did not start:** if the editor is already compiling when
+  `sync_and_compile` arrives (you focused the editor a moment ago, say), the tool rides
+  that compile instead of forcing a second one: it takes the compile's own start time as
+  the diagnostics marker, waits for it to settle, refreshes the asset database, and only
+  compiles again if the refresh found newer edits. The result says which happened.
 - **Auto-connect:** a tool call with no `port` attaches to the `select_editor`
   default, or to the only running editor when exactly one exists.
 - **Per-editor state:** the default target and the "latest" test run are tracked
@@ -140,8 +148,13 @@ The bridge communicates with Unity via a WebSocket server running in the Editor.
 - Auto-starts when Unity loads (`[InitializeOnLoad]`)
 - Allocates a port dynamically from 9100 upward and registers it in a discovery file, so
   multiple editors can run side by side (`list_editors` reads that registry)
+- Advertises its lifecycle in that entry - `ready`, `compiling` (with the compile's start
+  time) or `reloading` - and only removes the entry when the editor quits, so the bridge
+  can tell a domain reload from a closed editor
+- Does not start inside Unity's asset import worker processes, which load the same editor
+  assemblies but must not register as editors
 - Processes commands on the main thread (safe for Unity API calls)
-- Survives play mode transitions and script reloads
+- Survives play mode transitions and script reloads (re-registering on its previous port)
 
 ### Plugin Location
 
@@ -170,6 +183,10 @@ MediaVault/Assets/Scripts/Vecerdi.UnityMcp/
    call can race discovery - retry once
 4. If a modal dialog is open in the editor, every call fails generically while
    `list_editors` still works - dismiss the dialog
+5. "has been reloading the script domain for Ns" means the entry is stuck in `reloading`:
+   the editor never came back from a domain reload (a dialog, a crash, or a very long
+   import). Check the editor window; `list_editors` shows the state and how long it has
+   been in it
 
 ### No logs appearing
 

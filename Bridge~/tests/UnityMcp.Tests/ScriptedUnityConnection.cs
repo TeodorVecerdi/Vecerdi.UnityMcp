@@ -14,11 +14,13 @@ internal sealed class ScriptedUnityConnection : IUnityConnection {
         m_Responder = responder;
     }
 
+    public event Action? Connected;
     public bool IsConnected { get; set; } = true;
     public string CurrentUri => "ws://scripted/";
 
     public Task ConnectAsync(CancellationToken ct = default) {
         IsConnected = true;
+        Connected?.Invoke();
         return Task.CompletedTask;
     }
 

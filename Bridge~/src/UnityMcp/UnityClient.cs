@@ -33,6 +33,9 @@ public sealed class UnityError {
 /// <summary>
 /// WebSocket client for communicating with Unity Editor's MCP plugin.
 /// </summary>
+/// <summary>Thrown when the editor drops the socket while a request is waiting for its answer.</summary>
+public sealed class UnityConnectionLostException(string message) : Exception(message);
+
 public sealed class UnityClient : IUnityConnection {
     private readonly string m_Uri;
     private readonly TimeSpan m_Timeout;
@@ -171,7 +174,18 @@ public sealed class UnityClient : IUnityConnection {
                     throw new TimeoutException($"Request '{command}' timed out after {m_Timeout.TotalSeconds}s");
                 }
 
-                return await tcs.Task;
+                try {
+                    return await tcs.Task;
+                } catch (OperationCanceledException) when (!ct.IsCancellationRequested) {
+                    // The receive loop ended before an answer came: the editor closed the socket under us, which in
+                    // normal use means a domain reload started. Say so instead of "A task was canceled."
+                    var port = EditorDiscovery.TryGetPort(m_Uri);
+                    var why = port is { } p ? EditorDiscovery.DescribeInterruption(p) : null;
+                    throw new UnityConnectionLostException(
+                        $"The connection to Unity closed while waiting for '{command}'" +
+                        (why is not null ? $": {why}." : " - the editor is most likely reloading the script domain.") +
+                        " The command may or may not have run; check the editor state before repeating a non-idempotent call.");
+                }
             } finally {
                 m_PendingRequests.TryRemove(requestId, out _);
             }

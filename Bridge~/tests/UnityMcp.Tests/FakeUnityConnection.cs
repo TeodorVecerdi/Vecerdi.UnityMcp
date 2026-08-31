@@ -14,6 +14,7 @@ internal sealed class FakeUnityConnection : IUnityConnection {
         m_ConnectBehavior = connectBehavior;
     }
 
+    public event Action? Connected;
     public bool IsConnected { get; set; }
     public string CurrentUri { get; }
     public int ConnectCount { get; private set; }
@@ -26,6 +27,7 @@ internal sealed class FakeUnityConnection : IUnityConnection {
         var succeeded = m_ConnectBehavior?.Invoke(this) ?? true;
         if (succeeded) {
             IsConnected = true;
+            Connected?.Invoke();
         }
 
         return Task.CompletedTask;
