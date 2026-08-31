@@ -100,11 +100,18 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
+        var resolution = PortResolver.Resolve(port, pool.DefaultPort, EditorDiscovery.GetAvailableEditors());
+        if (resolution.Error is { } resolveError) return Error(resolveError);
+        var targetPort = resolution.Port!.Value;
 
-        var targetPort = EditorDiscovery.TryGetPort(unity!.CurrentUri);
-        return await RunSyncAndCompileAsync(unity, () => targetPort is { } p ? EditorDiscovery.FindEditorByPort(p) : null, ct);
+        // Snapshot the discovery entry BEFORE connecting. If the editor is mid-reload, AcquireAsync waits that reload
+        // out, and by the time we could read the entry afterwards it says 'ready' - the very compile we should be
+        // joining would have become invisible and we would force a second one.
+        var entryAtArrival = EditorDiscovery.FindEditorByPort(targetPort);
+
+        var (unity, connectionError) = await EditorAvailability.AcquireAsync(pool, targetPort, ct);
+        if (connectionError is not null) return Error(connectionError);
+        return await RunSyncAndCompileAsync(unity!, entryAtArrival, ct);
     }
 
     /// <summary>
@@ -113,11 +120,11 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// drains any pending import/compile before starting its own, and marks the log-buffer position so only
     /// diagnostics produced by this compile are returned.
     /// </summary>
-    /// <param name="registryProbe">Reads the editor's current discovery entry; used to join a compile already in flight.</param>
-    internal static async Task<CallToolResult> RunSyncAndCompileAsync(IUnityConnection unity, Func<EditorInstance?> registryProbe, CancellationToken ct) {
-        // Step 0: Is a compile we did not start already running (the user focused the editor a moment ago, say)?
-        // If the editor advertised when it started, join it instead of paying for a second one.
-        if (DetectInFlightCompile(registryProbe()) is { } inFlight) {
+    /// <param name="entryAtArrival">The editor's discovery entry as it was when the call arrived, before any connection wait; used to join a compile already in flight.</param>
+    internal static async Task<CallToolResult> RunSyncAndCompileAsync(IUnityConnection unity, EditorInstance? entryAtArrival, CancellationToken ct) {
+        // Step 0: Was a compile we did not start already running when the call arrived (the user focused the editor
+        // a moment ago, say)? If the editor advertised when it started, join it instead of paying for a second one.
+        if (DetectInFlightCompile(entryAtArrival) is { } inFlight) {
             return await JoinInFlightCompileAsync(unity, inFlight, ct);
         }
 
