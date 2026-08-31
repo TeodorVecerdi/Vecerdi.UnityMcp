@@ -39,6 +39,13 @@ public sealed class McpEditorServer {
     };
 
     static McpEditorServer() {
+        // Asset import workers (Unity 6.3+) are full editor instances: they load the project's editor assemblies
+        // and run [InitializeOnLoad] like the main editor does. A server started there would register itself in
+        // the discovery file and evict the real editor's entry (same project path), so never start one.
+        if (AssetDatabase.IsAssetImportWorkerProcess()) {
+            return;
+        }
+
         // Auto-start on editor load - use both delayCall and update to ensure
         // server starts even if editor doesn't have focus
         EditorApplication.delayCall += TryStartServer;
