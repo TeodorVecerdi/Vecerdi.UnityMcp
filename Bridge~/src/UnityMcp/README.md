@@ -119,7 +119,8 @@ Dynamic (editor-advertised; the live set is whatever the connected editor expose
   request that was already in flight when the socket dropped fails with a message naming
   the reload; treat it as "unknown whether it ran" for non-idempotent commands.
 - **Joining a compile you did not start:** if the editor is already compiling when
-  `sync_and_compile` arrives (you focused the editor a moment ago, say), the tool rides
+  `sync_and_compile` arrives, or starts compiling while the tool is still draining (you
+  focused the editor a moment ago, say), the tool rides
   that compile instead of forcing a second one: it takes the compile's own start time as
   the diagnostics marker, waits for it to settle, refreshes the asset database, and only
   compiles again if the refresh found newer edits. The result says which happened.
