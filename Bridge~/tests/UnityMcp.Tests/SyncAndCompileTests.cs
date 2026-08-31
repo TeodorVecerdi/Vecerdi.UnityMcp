@@ -65,7 +65,7 @@ public sealed class SyncAndCompileTests {
             _ => Ok(),
         });
 
-        var result = await UnityTools.RunSyncAndCompileAsync(editor, () => Entry(EditorInstanceState.Compiling, compileStartedAt), CancellationToken.None);
+        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Compiling, compileStartedAt), CancellationToken.None);
 
         var text = TextOf(result);
         Assert.True(result.IsError);
@@ -99,7 +99,7 @@ public sealed class SyncAndCompileTests {
             }
         });
 
-        var result = await UnityTools.RunSyncAndCompileAsync(editor, () => Entry(EditorInstanceState.Reloading, compileStartedAt), CancellationToken.None);
+        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Reloading, compileStartedAt), CancellationToken.None);
 
         var text = TextOf(result);
         Assert.False(result.IsError ?? false);
@@ -117,7 +117,7 @@ public sealed class SyncAndCompileTests {
             _ => Ok(),
         });
 
-        var result = await UnityTools.RunSyncAndCompileAsync(editor, () => Entry(EditorInstanceState.Ready, null), CancellationToken.None);
+        var result = await UnityTools.RunSyncAndCompileAsync(editor, Entry(EditorInstanceState.Ready, null), CancellationToken.None);
 
         Assert.False(result.IsError ?? false);
         Assert.Contains("unity.editor.recompile", commands);
