@@ -83,17 +83,12 @@ public sealed class UnityProxyTool : McpServerTool {
             return Result(resolveError, isError: true);
         }
 
-        IUnityConnection unity;
-        try {
-            unity = await m_Pool.AcquireAsync(resolution.Port!.Value, cancellationToken);
-        } catch (Exception ex) {
-            return Result(
-                $"Failed to connect to Unity Editor on port {resolution.Port}: {ex.Message}\n\n" +
-                "Make sure the Editor is running and the MCP plugin is active.",
-                isError: true);
+        var (unity, connectionError) = await EditorAvailability.AcquireAsync(m_Pool, resolution.Port!.Value, cancellationToken);
+        if (connectionError is not null) {
+            return Result(connectionError, isError: true);
         }
 
-        var response = await unity.SendAsync(m_Command, parameters.Count == 0 ? null : parameters, cancellationToken);
+        var response = await unity!.SendAsync(m_Command, parameters.Count == 0 ? null : parameters, cancellationToken);
         if (!response.Success) {
             var errorText = response.Error is not null
                 ? $"Unity error [{response.Error.Code}]: {response.Error.Message}"
