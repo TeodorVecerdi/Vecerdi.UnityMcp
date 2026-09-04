@@ -46,4 +46,4 @@ Vecerdi.UnityMcp/
 
 ## License
 
-[MIT NON-AI License](LICENSE).
+[MIT](LICENSE).
