@@ -404,7 +404,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     public async Task<CallToolResult> RunTests(
         [Description("Test mode: EditMode or PlayMode")] string testMode = "EditMode",
         [Description("Filter by test assembly names (without .dll)")] string[]? assemblyNames = null,
-        [Description("Filter by test names. PREFIX/CLASS MATCHING: a value is matched as a prefix, so a fully-qualified class name (e.g. 'MediaVault.Tests.SlugGeneratorTests') selects every test method in that class, a namespace prefix selects everything under it, and a full method name selects that single test. Always confirm the run's echoed 'resolved filter' and matched count - a typo silently matches nothing.")] string[]? testNames = null,
+        [Description("Filter by test names. PREFIX/CLASS MATCHING: a value is matched as a prefix, so a fully-qualified class name (e.g. 'MyGame.Tests.SlugGeneratorTests') selects every test method in that class, a namespace prefix selects everything under it, and a full method name selects that single test. Always confirm the run's echoed 'resolved filter' and matched count - a typo silently matches nothing.")] string[]? testNames = null,
         [Description("Filter by NUnit category names")] string[]? categoryNames = null,
         [Description("Filter by Unity test groups")] string[]? groupNames = null,
         [Description("Optional Unity build target name")] string? targetPlatform = null,

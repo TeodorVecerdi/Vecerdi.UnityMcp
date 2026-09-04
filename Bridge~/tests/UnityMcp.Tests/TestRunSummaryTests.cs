@@ -17,7 +17,7 @@ public sealed class TestRunSummaryTests {
           "runId": "abc",
           "status": "passed",
           "totals": { "discovered": 1803, "executed": 5, "passed": 5, "failed": 0, "skipped": 0, "inconclusive": 0, "other": 0 },
-          "filter": { "testMode": "EditMode", "assemblyNames": ["MediaVault.Tests"], "testNames": [], "categoryNames": [], "groupNames": [], "targetPlatform": null }
+          "filter": { "testMode": "EditMode", "assemblyNames": ["MyGame.Tests"], "testNames": [], "categoryNames": [], "groupNames": [], "targetPlatform": null }
         }
         """));
 
@@ -25,7 +25,7 @@ public sealed class TestRunSummaryTests {
         Assert.Contains("discovered (entire test tree", summary);
         Assert.Contains("1803", summary);
         Assert.Contains("resolved filter:", summary);
-        Assert.Contains("assemblyNames=[MediaVault.Tests]", summary);
+        Assert.Contains("assemblyNames=[MyGame.Tests]", summary);
         Assert.DoesNotContain("WARNING", summary);
     }
 
@@ -36,12 +36,12 @@ public sealed class TestRunSummaryTests {
           "runId": "abc",
           "status": "passed",
           "totals": { "discovered": 1803, "executed": 0, "passed": 0, "failed": 0, "skipped": 0, "inconclusive": 0, "other": 0 },
-          "filter": { "testMode": "EditMode", "testNames": ["MediaVault.Tests.DoesNotExist"] }
+          "filter": { "testMode": "EditMode", "testNames": ["MyGame.Tests.DoesNotExist"] }
         }
         """));
 
         Assert.Contains("WARNING: the filter matched 0 tests", summary);
-        Assert.Contains("testNames=[MediaVault.Tests.DoesNotExist]", summary);
+        Assert.Contains("testNames=[MyGame.Tests.DoesNotExist]", summary);
     }
 
     [Fact]
@@ -53,13 +53,13 @@ public sealed class TestRunSummaryTests {
           "totals": { "discovered": 1803, "executed": 3, "passed": 2, "failed": 1, "skipped": 0, "inconclusive": 0, "other": 0 },
           "filter": { "testMode": "EditMode" },
           "failures": [
-            { "name": "MediaVault.Tests.FooTests.Bar", "message": "Expected 1 but was 2", "stackTrace": "at Foo()" }
+            { "name": "MyGame.Tests.FooTests.Bar", "message": "Expected 1 but was 2", "stackTrace": "at Foo()" }
           ]
         }
         """));
 
         Assert.Contains("1 failed, 2 passed of 3 ran", summary);
-        Assert.Contains("MediaVault.Tests.FooTests.Bar", summary);
+        Assert.Contains("MyGame.Tests.FooTests.Bar", summary);
         Assert.Contains("Expected 1 but was 2", summary);
     }
 

@@ -15,7 +15,7 @@ public sealed class SyncAndCompileTests {
 
     private static EditorInstance Entry(string state, DateTimeOffset? compileStartedAt) => new() {
         Port = 9100,
-        ProjectName = "MediaVault",
+        ProjectName = "MyGame",
         State = state,
         StateChangedAt = DateTimeOffset.UtcNow,
         CompilationStartedAt = compileStartedAt,

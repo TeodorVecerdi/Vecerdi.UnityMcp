@@ -32,8 +32,8 @@ public sealed class EditorAvailabilityTests : IDisposable {
 
     private static EditorInstance Editor(string state, DateTimeOffset? changedAt = null) => new() {
         Port = Port,
-        ProjectName = "MediaVault",
-        ProjectPath = "D:/x/MediaVault",
+        ProjectName = "MyGame",
+        ProjectPath = "D:/x/MyGame",
         ProcessId = Environment.ProcessId,
         State = state,
         StateChangedAt = changedAt ?? DateTimeOffset.UtcNow,
