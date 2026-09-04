@@ -1,0 +1,6 @@
+# Build output when no hosting repository redirects ArtifactsPath (see Directory.Build.props)
+artifacts/
+bin/
+obj/
+*.user
+mcp.log

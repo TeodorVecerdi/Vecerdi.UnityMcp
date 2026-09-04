@@ -1,0 +1,32 @@
+<Project>
+
+    <!--
+      Shared settings for the bridge (the MCP server console app) and its tests.
+
+      Output location: a hosting repository may already define ArtifactsPath in a Directory.Build.props
+      somewhere above this folder (MediaVault routes every project under Assets/ into its root artifacts/).
+      That ancestor file is imported first so its choice wins; when there is none, or it leaves the
+      property unset, output goes to artifacts/ next to this file (gitignored). Everything below the
+      import is set unconditionally so a host's other defaults cannot leak into the bridge build.
+    -->
+    <PropertyGroup>
+        <_UnityMcpHostProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</_UnityMcpHostProps>
+    </PropertyGroup>
+    <Import Project="$(_UnityMcpHostProps)" Condition="'$(_UnityMcpHostProps)' != ''" />
+
+    <PropertyGroup>
+        <UseArtifactsOutput>true</UseArtifactsOutput>
+        <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory)artifacts/</ArtifactsPath>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <WarningLevel>4</WarningLevel>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <Deterministic>true</Deterministic>
+    </PropertyGroup>
+
+</Project>
