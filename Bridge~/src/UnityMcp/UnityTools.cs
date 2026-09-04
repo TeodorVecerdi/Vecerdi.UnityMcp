@@ -366,7 +366,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         [Description("Invoke as instance method instead of static")] bool invokeOnInstance = false,
         [Description("Constructor arguments when invokeOnInstance=true")] object[]? constructorArguments = null,
         [Description("Allow non-public members")] bool includeNonPublic = false,
-        [Description("How long (ms) to wait for a Task/UniTask result before backgrounding it (default 2000, max 25000). The wait blocks the editor main thread, so keep it short for tasks that may need that thread.")] int? waitMs = null,
+        [Description("How long (ms) to wait for an async result (Task, ValueTask, UniTask or Unity Awaitable) before backgrounding it (default 2000, max 25000). The wait blocks the editor main thread, so keep it short for tasks that may need that thread.")] int? waitMs = null,
         [Description(PortParamDescription)] int? port = null,
         CancellationToken ct = default
     ) {

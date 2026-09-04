@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
+using UnityEngine;
 using Vecerdi.UnityMcp.Protocol;
 using Object = UnityEngine.Object;
 
@@ -49,6 +50,9 @@ internal static class PendingInvocationRegistry {
     }
 
     public static void Remove(string id) => s_Entries.TryRemove(id, out _);
+
+    /// <summary>Invocations still being polled for (or never claimed and not yet expired).</summary>
+    public static int Count => s_Entries.Count;
 }
 
 /// <summary>
@@ -236,7 +240,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
 
         try {
             var invocationResult = resolvedMethod.Invoke(instance, convertedArguments);
-            if (invocationResult is not null and not Task && TryConvertUniTaskToTask(invocationResult) is { } convertedTask) {
+            if (invocationResult is not null and not Task && TryConvertAwaitableToTask(invocationResult) is { } convertedTask) {
                 invocationResult = convertedTask;
             }
 
@@ -578,10 +582,63 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
     }
 
     /// <summary>
-    /// Converts a boxed <c>UniTask</c>/<c>UniTask&lt;T&gt;</c> return value to a <see cref="Task"/>
-    /// via Cysharp's <c>UniTaskExtensions.AsTask</c>, resolved by reflection so this assembly
-    /// needs no UniTask reference. Returns null for anything else (including <c>UniTaskVoid</c>,
-    /// which is fire-and-forget by contract and cannot be observed).
+    /// Converts the non-<see cref="Task"/> awaitables a method may return into a <see cref="Task"/>
+    /// so the bounded-wait/poll handling above applies uniformly: <see cref="ValueTask"/> and
+    /// <see cref="ValueTask{TResult}"/>, Unity's <see cref="Awaitable"/> and <see cref="Awaitable{T}"/>,
+    /// and Cysharp's <c>UniTask</c>/<c>UniTask&lt;T&gt;</c>. All of these can have continuations
+    /// that need the editor main thread, so blocking on any of them without a bound would deadlock
+    /// exactly like a UniTask. Returns null for anything else (including <c>UniTaskVoid</c>, which
+    /// is fire-and-forget by contract and cannot be observed).
+    /// </summary>
+    private static Task? TryConvertAwaitableToTask(object invocationResult) {
+        return invocationResult switch {
+            ValueTask valueTask => valueTask.AsTask(),
+            Awaitable awaitable => AwaitAsTask(awaitable),
+            _ => TryConvertGenericValueTaskToTask(invocationResult)
+                 ?? TryConvertGenericAwaitableToTask(invocationResult)
+                 ?? TryConvertUniTaskToTask(invocationResult),
+        };
+    }
+
+    private static async Task AwaitAsTask(Awaitable awaitable) => await awaitable;
+
+    private static async Task<T> AwaitAsTask<T>(Awaitable<T> awaitable) => await awaitable;
+
+    /// <summary>Boxed <c>ValueTask&lt;T&gt;</c> → <c>Task&lt;T&gt;</c> via its own <c>AsTask()</c>.</summary>
+    private static Task? TryConvertGenericValueTaskToTask(object invocationResult) {
+        var type = invocationResult.GetType();
+        if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(ValueTask<>)) {
+            return null;
+        }
+
+        try {
+            return (Task?)type.GetMethod(nameof(ValueTask.AsTask), Type.EmptyTypes)?.Invoke(invocationResult, null);
+        } catch {
+            return null;
+        }
+    }
+
+    /// <summary>Boxed <c>Awaitable&lt;T&gt;</c> → <c>Task&lt;T&gt;</c> through the generic wrapper above.</summary>
+    private static Task? TryConvertGenericAwaitableToTask(object invocationResult) {
+        var type = invocationResult.GetType();
+        if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(Awaitable<>)) {
+            return null;
+        }
+
+        try {
+            var wrapper = typeof(InvokeManagedMethodCommand)
+                .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
+                .First(m => m.Name == nameof(AwaitAsTask) && m.IsGenericMethodDefinition);
+            return (Task?)wrapper.MakeGenericMethod(type.GetGenericArguments()).Invoke(null, [invocationResult]);
+        } catch {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Boxed <c>UniTask</c>/<c>UniTask&lt;T&gt;</c> → <see cref="Task"/> via Cysharp's
+    /// <c>UniTaskExtensions.AsTask</c>, resolved by reflection so this assembly needs no UniTask
+    /// reference.
     /// </summary>
     private static Task? TryConvertUniTaskToTask(object invocationResult) {
         var type = invocationResult.GetType();

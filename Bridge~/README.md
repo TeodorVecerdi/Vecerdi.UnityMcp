@@ -109,7 +109,7 @@ Native (bridge-side):
 | `sync_and_compile` | **Default "make my edits take effect" call.** Refresh + recompile + wait + fresh diagnostics, as one operation |
 | `refresh_assets` | Refresh asset database; reports whether a compile was triggered (prefer `sync_and_compile` for code changes) |
 | `get_logs` | Get recent Unity console logs (with timestamps + buffer-wrap note) |
-| `invoke_managed_method` | Invoke managed methods via reflection with JSON arguments; Task/UniTask results are awaited up to `waitMs`, then backgrounded (see below) |
+| `invoke_managed_method` | Invoke managed methods via reflection with JSON arguments; async results (Task, ValueTask, UniTask, Awaitable) are awaited up to `waitMs`, then backgrounded (see below) |
 | `run_tests` | Run Unity tests with filter support and optional wait-for-completion |
 | `get_test_run_status` | Get status/results of a test run |
 | `cancel_test_run` | Cancel an active test run |
@@ -152,9 +152,10 @@ Dynamic (editor-advertised; the live set is whatever the connected editor expose
   on the main thread, so a slow `invoke_managed_method` stalls other queued calls
   to that editor. Calls are serialized, not parallel.
 - **Async invokes never deadlock:** `invoke_managed_method` waits at most `waitMs`
-  (default 2s) for a Task/UniTask result, then returns `{pending: true, invocationId}`
+  (default 2s) for an async result - `Task`, `ValueTask`, `UniTask` or Unity's
+  `Awaitable`, generic or not - then returns `{pending: true, invocationId}`
   and lets the main thread resume - which is what allows main-thread-bound
-  continuations (UniTask/PlayerLoop) to complete. Poll `get_invocation_result` for
+  continuations (UniTask/PlayerLoop, Awaitable, the Unity sync context) to complete. Poll `get_invocation_result` for
   the outcome (handed out once; entries expire after ~1h or on domain reload).
 - **run_tests filters:** `testNames` is prefix/class matching - a class FQN runs
   all its methods. The result labels *matched-and-ran* separately from the
