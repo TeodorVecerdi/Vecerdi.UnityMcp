@@ -4,15 +4,15 @@ This directory inherits the repository-wide instructions from the consuming repo
 
 ## Copilot CLI / MCP launch workflow
 
-- The consuming repository's `.mcp.json` (and any other MCP client config) is expected to launch the published binary at `artifacts\publish\UnityMcp\release\unity-mcp.exe` (the default artifacts output layout; see the repo-root `tools\Directory.Build.props`).
+- The consuming repository's `.mcp.json` (and any other MCP client config) is expected to launch the published binary at `artifacts\publish\UnityMcp\release\unity-mcp.exe` (the artifacts output layout; the hosting repository's `Directory.Build.props` decides the artifacts root, else it is `Bridge~\artifacts\` - see `Directory.Build.props` here).
 - Do **not** switch the MCP entry back to `dotnet run` unless the user explicitly asks for that behavior.
 
 ## After changing code in this directory
 
-If you change files under `tools\unity-mcp\`, republish the MCP server before considering the change complete:
+If you change files under `Bridge~\src\`, republish the MCP server before considering the change complete:
 
 ```powershell
-dotnet publish .\tools\unity-mcp\UnityMcp.csproj -c Release -nologo
+dotnet publish <path-to>\Bridge~\src\UnityMcp\UnityMcp.csproj -c Release -nologo
 ```
 
 ## Common publish failure

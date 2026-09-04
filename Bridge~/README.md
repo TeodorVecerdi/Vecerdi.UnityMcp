@@ -41,20 +41,39 @@ Tools come from two places:
 1. **.NET 10 SDK** installed
 2. **Unity Editor** with the MCP plugin (the `Vecerdi.UnityMcp/` folder under your project's `Assets/`)
 
+## Layout
+
+The bridge lives in `Bridge~/` inside the editor plugin folder. The trailing `~` hides it from Unity's
+importer, so the plugin and the bridge share one folder (and one repository) without Unity generating
+meta files or trying to compile the bridge sources.
+
+```
+Vecerdi.UnityMcp/               # editor plugin (compiled by Unity)
+└── Bridge~/                    # this bridge (ignored by Unity)
+    ├── UnityMcp.slnx           # solution: bridge + tests
+    ├── Directory.Build.props   # shared settings + output location
+    ├── src/UnityMcp/           # the MCP server console app
+    └── tests/UnityMcp.Tests/   # xunit tests
+```
+
 ## Building
 
 ```bash
-cd tools/unity-mcp
+cd Bridge~
 dotnet build
 ```
 
-For MCP clients, publish a stable executable and point the client at that binary. Build output uses the artifacts output layout (see the repo-root `tools/Directory.Build.props`), so the published binary lands at `<repo>/artifacts/publish/UnityMcp/release/unity-mcp.exe`:
+For MCP clients, publish a stable executable and point the client at that binary. Build output uses the
+artifacts output layout. A hosting repository that defines `ArtifactsPath` in a `Directory.Build.props`
+above this folder decides where that is (MediaVault routes it to `<repo>/artifacts/`); otherwise output
+goes to `Bridge~/artifacts/`. Either way the published binary lands at
+`<artifacts>/publish/UnityMcp/release/unity-mcp.exe`:
 
 ```bash
-dotnet publish -c Release
+dotnet publish src/UnityMcp/UnityMcp.csproj -c Release
 ```
 
-If you change code under `tools/unity-mcp`, rerun that publish command before expecting MCP clients to use the updated implementation. If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, stop the MCP client that is currently running the server, publish again, then restart the client. (Editor-side tool changes need neither publish nor client restart — see dynamic tools above.)
+If you change code under `Bridge~/src`, rerun that publish command before expecting MCP clients to use the updated implementation. If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, stop the MCP client that is currently running the server, publish again, then restart the client. (Editor-side tool changes need neither publish nor client restart — see dynamic tools above.)
 
 ## Configuration for AI Agents
 
@@ -161,6 +180,7 @@ The bridge communicates with Unity via a WebSocket server running in the Editor.
 
 ```
 <project>/Assets/.../Vecerdi.UnityMcp/
+├── Bridge~/                  # the bridge (this README), ignored by Unity
 ├── McpEditorServer.cs        # WebSocket server + command registration
 ├── McpServerWindow.cs        # Editor window (Window > Unity MCP Server)
 ├── EditorInstanceRegistry.cs # Dynamic port allocation + discovery file
