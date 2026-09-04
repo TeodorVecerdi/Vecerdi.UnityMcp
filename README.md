@@ -2,8 +2,7 @@
 
 A Model Context Protocol (MCP) server for the Unity Editor, so AI coding agents can make their edits
 take effect, read compiler diagnostics and console output, run tests, invoke managed methods, and
-drive play mode against a live editor. Originally built for MediaVault, a Unity-based desktop media
-app; now maintained as a standalone package.
+drive play mode against a live editor.
 
 It has two halves that ship together in this repository:
 
@@ -15,13 +14,22 @@ It has two halves that ship together in this repository:
 The two talk over a small JSON protocol and change in lockstep, which is why they are versioned
 together: one pin gives a project a matching pair.
 
+## Requirements
+
+- One of:
+    - **Unity 6.5 or later** with [UnityRoslynUpdater](https://github.com/DaZombieKiller/UnityRoslynUpdater) to
+      enable modern C# features (C# 13+) on the Mono runtime
+    - **Unity 7 or later**, which runs on CoreCLR and ships the latest C# features out of the box
+- [`Vecerdi.Extensions.Logging`](https://github.com/TeodorVecerdi/Vecerdi.Extensions.Logging), which has the same
+  Unity requirements
+- The `WebSocketSharp-netstandard` NuGet package (e.g. via NuGetForUnity) for the editor-side WebSocket server
+- The **.NET 10 SDK** to build the bridge
+
 ## Installation
 
 1. Put this repository under your project's `Assets/` (as a git submodule, or copied), for example
    `Assets/Scripts/Vecerdi.UnityMcp/`.
-2. Make sure the plugin's dependencies are present in the project:
-   - [`Vecerdi.Extensions.Logging`](https://github.com/TeodorVecerdi/Vecerdi.Extensions.Logging)
-   - `websocket-sharp` (the `WebSocketSharp-netstandard` NuGet package, e.g. via NuGetForUnity)
+2. Make sure the dependencies listed under Requirements are present in the project.
 3. Optionally add a `csc.rsp` next to the asmdef with your project's compiler conventions
    (nullable, language version, warnings-as-errors). The file is gitignored here on purpose so each
    host project keeps its own.
