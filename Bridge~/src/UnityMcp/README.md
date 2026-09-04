@@ -33,13 +33,13 @@ Tools come from two places:
   every domain reload, so a `sync_and_compile` that compiles a new tool makes it appear in the
   same agent session (`notifications/tools/list_changed`). **Adding an editor-side tool
   therefore needs no bridge rebuild**: implement the command + descriptor in
-  `MediaVault/Assets/Scripts/Vecerdi.UnityMcp/`, register it in `McpEditorServer`, recompile.
+  the editor plugin (`Vecerdi.UnityMcp/` under your project's `Assets/`), register it in `McpEditorServer`, recompile.
   Native tool names shadow dynamic ones, so bridge tools can be migrated gradually.
 
 ## Prerequisites
 
 1. **.NET 10 SDK** installed
-2. **Unity Editor** with the MCP plugin (in `MediaVault/Assets/Scripts/Vecerdi.UnityMcp/`)
+2. **Unity Editor** with the MCP plugin (the `Vecerdi.UnityMcp/` folder under your project's `Assets/`)
 
 ## Building
 
@@ -62,7 +62,7 @@ If you change code under `tools/unity-mcp`, rerun that publish command before ex
 {
   "mcpServers": {
     "unity": {
-      "command": "D:/dev/unity/media-vault/artifacts/publish/UnityMcp/release/unity-mcp.exe"
+      "command": "<repo>/artifacts/publish/UnityMcp/release/unity-mcp.exe"
     }
   }
 }
@@ -160,7 +160,7 @@ The bridge communicates with Unity via a WebSocket server running in the Editor.
 ### Plugin Location
 
 ```
-MediaVault/Assets/Scripts/Vecerdi.UnityMcp/
+<project>/Assets/.../Vecerdi.UnityMcp/
 ├── McpEditorServer.cs        # WebSocket server + command registration
 ├── McpServerWindow.cs        # Editor window (Window > Unity MCP Server)
 ├── EditorInstanceRegistry.cs # Dynamic port allocation + discovery file

@@ -1,10 +1,10 @@
 # Unity MCP Agent Notes
 
-This directory inherits the repository-wide instructions from `D:\dev\unity\media-vault\AGENTS.md`.
+This directory inherits the repository-wide instructions from the consuming repository's root `AGENTS.md`.
 
 ## Copilot CLI / MCP launch workflow
 
-- `D:\dev\unity\media-vault\.mcp.json` is expected to launch the published binary at `artifacts\publish\UnityMcp\release\unity-mcp.exe` (the default artifacts output layout; see the repo-root `tools\Directory.Build.props`).
+- The consuming repository's `.mcp.json` (and any other MCP client config) is expected to launch the published binary at `artifacts\publish\UnityMcp\release\unity-mcp.exe` (the default artifacts output layout; see the repo-root `tools\Directory.Build.props`).
 - Do **not** switch the MCP entry back to `dotnet run` unless the user explicitly asks for that behavior.
 
 ## After changing code in this directory
