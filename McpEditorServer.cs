@@ -37,7 +37,7 @@ public sealed class McpEditorServer {
     private readonly McpCommandRegistry m_Commands = new();
     private readonly LogBuffer m_LogBuffer = new();
     private readonly ConcurrentQueue<(McpRequest Request, Action<McpResponse> SendResponse)> m_PendingRequests = new();
-    private readonly ILogger<McpEditorServer> m_Logger = UnityLoggerFactory.CreateLogger<McpEditorServer>();
+    private readonly ILogger<McpEditorServer> m_Logger = UnityLoggers.For<McpEditorServer>();
 
     private WebSocketServer? m_Server;
     private bool m_IsRunning;
