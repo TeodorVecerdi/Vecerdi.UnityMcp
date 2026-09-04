@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using UnityEditor;
@@ -23,6 +24,15 @@ public sealed class McpEditorServer {
     public static bool IsRunning => s_Instance?.m_IsRunning ?? false;
     public static int Port => s_Instance?.m_Port ?? 0;
     public static int ConnectionCount => s_Instance?.m_ConnectionCount ?? 0;
+
+    /// <summary>Lifecycle state advertised in the discovery file (<see cref="EditorInstanceState"/>).</summary>
+    public static string AdvertisedState => s_Instance?.m_AdvertisedState ?? EditorInstanceState.Ready;
+
+    /// <summary>Console entries currently held for <c>get_logs</c>, and how many were dropped since startup.</summary>
+    public static (int Count, int Dropped) LogBufferStats => s_Instance is { } server ? (server.m_LogBuffer.Count, server.m_LogBuffer.DroppedSinceStart) : (0, 0);
+
+    /// <summary>Every registered command handler, for display; those implementing <see cref="IMcpToolProvider"/> are exposed to agents as tools.</summary>
+    public static IEnumerable<IMcpCommandHandler> RegisteredHandlers => s_Instance?.m_Commands.GetHandlers() ?? [];
 
     private readonly McpCommandRegistry m_Commands = new();
     private readonly LogBuffer m_LogBuffer = new();

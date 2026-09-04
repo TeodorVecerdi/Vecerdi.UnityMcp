@@ -40,6 +40,15 @@ public sealed class LogBuffer : IDisposable {
     /// Total number of entries evicted because the ring buffer filled, since this buffer was created.
     /// Lets a caller tell "nothing new was logged" apart from "older entries scrolled out of the buffer".
     /// </summary>
+    /// <summary>Entries currently buffered.</summary>
+    public int Count {
+        get {
+            lock (m_Lock) {
+                return m_Logs.Count;
+            }
+        }
+    }
+
     public int DroppedSinceStart {
         get {
             lock (m_Lock) {
