@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Assemblies;
 using Vecerdi.UnityMcp.Protocol;
 using Object = UnityEngine.Object;
 
@@ -338,7 +339,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
     private static bool TryResolveType(string typeName, string? assemblyName, out Type type, out string? error) {
         if (!string.IsNullOrWhiteSpace(assemblyName)) {
             try {
-                var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase))
+                var assembly = CurrentAssemblies.GetLoadedAssemblies().FirstOrDefault(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase))
                             ?? Assembly.Load(assemblyName);
 
                 var explicitType = assembly.GetType(typeName, false, true);
@@ -361,7 +362,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             return true;
         }
 
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+        foreach (var assembly in CurrentAssemblies.GetLoadedAssemblies()) {
             var found = assembly.GetType(typeName, false, true);
             if (found is null) continue;
             type = found;
