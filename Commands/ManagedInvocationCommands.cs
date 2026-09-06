@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Assemblies;
 using Vecerdi.UnityMcp.Protocol;
@@ -18,6 +19,7 @@ namespace Vecerdi.UnityMcp.Commands;
 /// once (removed when a completed/faulted result is retrieved) and expire after an hour or on
 /// domain reload — a pending invocation is a live poll target, not durable storage.
 /// </summary>
+[NoAutoStaticsCleanup]
 internal static class PendingInvocationRegistry {
     private sealed record Entry(Task Task, string Method, DateTime StartedUtc);
 
@@ -116,6 +118,7 @@ public sealed class GetInvocationResultCommand : IMcpCommandHandler, IMcpToolPro
 /// <summary>
 /// Command: unity.managed.invokeMethod - Invoke a managed method via reflection.
 /// </summary>
+[NoAutoStaticsCleanup]
 public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
     public string Command => "unity.managed.invokeMethod";
 
@@ -596,8 +599,8 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             ValueTask valueTask => valueTask.AsTask(),
             Awaitable awaitable => AwaitAsTask(awaitable),
             _ => TryConvertGenericValueTaskToTask(invocationResult)
-                 ?? TryConvertGenericAwaitableToTask(invocationResult)
-                 ?? TryConvertUniTaskToTask(invocationResult),
+              ?? TryConvertGenericAwaitableToTask(invocationResult)
+              ?? TryConvertUniTaskToTask(invocationResult),
         };
     }
 

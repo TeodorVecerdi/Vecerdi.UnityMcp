@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Unity.Scripting.LifecycleManagement;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
@@ -266,6 +267,7 @@ internal sealed class McpTestRunCallback : ScriptableObject, IErrorCallbacks {
     }
 }
 
+[NoAutoStaticsCleanup]
 internal static class McpTestRunStore {
     private static readonly object s_Lock = new();
     private static readonly Dictionary<string, TestRunState> s_Runs = new(StringComparer.OrdinalIgnoreCase);

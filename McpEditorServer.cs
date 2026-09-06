@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Unity.Scripting.LifecycleManagement;
 using UnityEditor;
 using UnityEditor.Compilation;
 using Vecerdi.Extensions.Logging;
@@ -17,6 +18,7 @@ namespace Vecerdi.UnityMcp;
 /// WebSocket server that handles MCP requests in the Unity Editor.
 /// </summary>
 [InitializeOnLoad]
+[NoAutoStaticsCleanup]
 public sealed class McpEditorServer {
     private static McpEditorServer? s_Instance;
 

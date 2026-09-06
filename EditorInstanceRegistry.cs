@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 
@@ -55,6 +58,7 @@ public static class EditorInstanceState {
 /// <summary>
 /// Manages the discovery file for Unity Editor instances.
 /// </summary>
+[NoAutoStaticsCleanup]
 public static class EditorInstanceRegistry {
     private const int MinPort = 9100;
     private const int MaxPort = 9200;
@@ -220,7 +224,7 @@ public static class EditorInstanceRegistry {
         foreach (var instance in instances) {
             // Remove entries with the same project path as the current instance
             // (Unity doesn't allow opening the same project twice, so this must be stale)
-            if (currentProjectPath != null && 
+            if (currentProjectPath != null &&
                 string.Equals(instance.ProjectPath, currentProjectPath, StringComparison.OrdinalIgnoreCase)) {
                 logger?.LogDebug("Removing stale instance on port {Port} (duplicate project path: {ProjectPath})",
                     instance.Port, instance.ProjectPath);
@@ -260,7 +264,7 @@ public static class EditorInstanceRegistry {
 
     private static bool IsPortAvailable(int port) {
         try {
-            var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+            var listener = new TcpListener(IPAddress.Loopback, port);
             listener.Start();
             listener.Stop();
             return true;
