@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
@@ -188,8 +189,10 @@ public static class EditorInstanceRegistry {
                 return [];
             }
 
-            var json = File.ReadAllText(s_DiscoveryFilePath);
-            return JsonSerializer.Deserialize<List<EditorInstance>>(json, s_JsonOptions) ?? [];
+            // Delete sharing: another editor replaces this file by rename (see SaveInstances), which Windows refuses
+            // while any reader holds it open without FILE_SHARE_DELETE. The open handle keeps reading the old document.
+            using var stream = new FileStream(s_DiscoveryFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return JsonSerializer.Deserialize<List<EditorInstance>>(stream, s_JsonOptions) ?? [];
         } catch (Exception ex) {
             logger?.LogWarning(ex, "Failed to load discovery file");
             return [];
@@ -197,6 +200,7 @@ public static class EditorInstanceRegistry {
     }
 
     private static void SaveInstances(List<EditorInstance> instances, ILogger? logger) {
+        var tempPath = s_DiscoveryFilePath + "." + Process.GetCurrentProcess().Id + ".tmp";
         try {
             var directory = Path.GetDirectoryName(s_DiscoveryFilePath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) {
@@ -206,15 +210,30 @@ public static class EditorInstanceRegistry {
             // Write-then-rename so a concurrent reader (the stdio bridge polls this file around reloads) never
             // sees a truncated document.
             var json = JsonSerializer.Serialize(instances, s_JsonOptions);
-            var tempPath = s_DiscoveryFilePath + "." + Process.GetCurrentProcess().Id + ".tmp";
             File.WriteAllText(tempPath, json);
-            if (File.Exists(s_DiscoveryFilePath)) {
-                File.Replace(tempPath, s_DiscoveryFilePath, destinationBackupFileName: null);
-            } else {
-                File.Move(tempPath, s_DiscoveryFilePath);
+
+            // The replace fails while anything holds the file open without delete sharing. Our own readers share
+            // delete, but scanners and indexers open files too, briefly - so retry for a moment before giving up.
+            for (var attempt = 0; ; attempt++) {
+                try {
+                    if (File.Exists(s_DiscoveryFilePath)) {
+                        File.Replace(tempPath, s_DiscoveryFilePath, destinationBackupFileName: null);
+                    } else {
+                        File.Move(tempPath, s_DiscoveryFilePath);
+                    }
+
+                    break;
+                } catch (IOException) when (attempt < 4) {
+                    Thread.Sleep(10);
+                }
             }
         } catch (Exception ex) {
             logger?.LogWarning(ex, "Failed to save discovery file");
+            try {
+                File.Delete(tempPath);
+            } catch {
+                // Best effort; the next save overwrites it.
+            }
         }
     }
 

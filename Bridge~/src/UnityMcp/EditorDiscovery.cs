@@ -96,8 +96,12 @@ public static class EditorDiscovery {
                     return [];
                 }
 
-                var json = File.ReadAllText(s_DiscoveryFilePath);
-                var instances = JsonSerializer.Deserialize<List<EditorInstance>>(json, s_JsonOptions) ?? [];
+                // Delete sharing, or the editor's rename over this file fails for as long as the read holds it open
+                // (File.ReadAllText shares read only). The open handle keeps reading the old document.
+                List<EditorInstance> instances;
+                using (var stream = new FileStream(s_DiscoveryFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+                    instances = JsonSerializer.Deserialize<List<EditorInstance>>(stream, s_JsonOptions) ?? [];
+                }
 
                 // Filter to only alive instances
                 return instances.Where(i => i.IsAlive).ToList();
