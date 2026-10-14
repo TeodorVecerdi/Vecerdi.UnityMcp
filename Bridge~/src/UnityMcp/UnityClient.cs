@@ -203,6 +203,15 @@ public sealed class UnityClient : IUnityConnection {
                 var result = await webSocket.ReceiveAsync(buffer, ct);
 
                 if (result.MessageType == WebSocketMessageType.Close) {
+                    // Complete the close handshake. The editor closes every connection on each code reload, and
+                    // without a reply its WebSocketServer.Stop() waits out its full 1 s close timeout per connection.
+                    try {
+                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                        await webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, timeout.Token);
+                    } catch (Exception ex) when (ex is WebSocketException or OperationCanceledException) {
+                        // The editor may already be gone (or wedged); cancelling aborts the socket, which ends it too.
+                    }
+
                     break;
                 }
 
