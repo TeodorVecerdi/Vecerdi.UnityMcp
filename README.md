@@ -22,6 +22,9 @@ together: one pin gives a project a matching pair.
     - **Unity 7 or later**, which runs on CoreCLR and ships the latest C# features out of the box
 - [`Vecerdi.Extensions.Logging`](https://github.com/TeodorVecerdi/Vecerdi.Extensions.Logging), which has the same
   Unity requirements
+- The `Vecerdi.Extensions.Lifetime` assembly from
+  [`Vecerdi.Extensions.DependencyInjection`](https://github.com/TeodorVecerdi/Vecerdi.Extensions.DependencyInjection)
+  (`Lifetime/`, no references of its own), which suspends the server on a code reload and stops it on quit
 - The `WebSocketSharp-netstandard` NuGet package (e.g. via NuGetForUnity) for the editor-side WebSocket server
 - The **.NET 10 SDK** to build the bridge
 
