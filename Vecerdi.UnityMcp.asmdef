@@ -2,7 +2,8 @@
     "name": "Vecerdi.UnityMcp",
     "rootNamespace": "",
     "references": [
-        "Vecerdi.Extensions.Logging"
+        "Vecerdi.Extensions.Logging",
+        "Vecerdi.Extensions.Lifetime"
     ],
     "includePlatforms": [
         "Editor"

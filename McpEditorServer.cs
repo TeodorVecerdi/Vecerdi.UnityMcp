@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Unity.Scripting.LifecycleManagement;
 using UnityEditor;
 using UnityEditor.Compilation;
+using Vecerdi.Extensions.Lifetime;
 using Vecerdi.Extensions.Logging;
 using Vecerdi.UnityMcp.Commands;
 using Vecerdi.UnityMcp.Protocol;
@@ -69,18 +70,21 @@ public sealed class McpEditorServer {
         // This ensures the server starts even when Unity doesn't have focus
         EditorApplication.update += OnEditorUpdate;
 
-        // A domain reload only suspends the server: the socket goes down but the discovery entry stays, flagged
+        // A code reload only suspends the server: the socket goes down but the discovery entry stays, flagged
         // 'reloading', so the stdio bridge can tell "wait a moment" from "the editor is gone". Quitting unregisters.
-        AssemblyReloadEvents.beforeAssemblyReload += () => {
-            s_Instance?.m_LogBuffer.Dispose();
-            s_Instance?.Suspend();
-        };
-        EditorApplication.quitting += () => s_Instance?.Stop();
+        CodeLifetime.OnStopping(nameof(McpEditorServer), static ending => {
+            if (ending == CodeLifetimeEnd.Reload) {
+                s_Instance?.m_LogBuffer.Dispose();
+                s_Instance?.Suspend();
+            } else {
+                s_Instance?.Stop();
+            }
+        });
 
         // Advertise script compilation with its start time; the bridge uses it as the diagnostics marker when it
         // joins a compile it did not trigger. A compile with errors ends in 'ready' (no reload follows); a clean one
-        // stays 'compiling' until beforeAssemblyReload turns it into 'reloading', so a reloading entry only carries
-        // a compilation start when that compile is what caused the reload.
+        // stays 'compiling' until the code lifetime's reload stop turns it into 'reloading', so a reloading entry
+        // only carries a compilation start when that compile is what caused the reload.
         CompilationPipeline.compilationStarted += _ => s_Instance?.OnCompilationStarted();
         CompilationPipeline.assemblyCompilationFinished += (_, messages) => s_Instance?.OnAssemblyCompiled(messages);
         CompilationPipeline.compilationFinished += _ => s_Instance?.OnCompilationFinished();
