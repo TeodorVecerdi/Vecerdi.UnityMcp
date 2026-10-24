@@ -14,9 +14,9 @@
     </PropertyGroup>
     <Import Project="$(_UnityMcpHostProps)" Condition="'$(_UnityMcpHostProps)' != ''" />
 
-    <PropertyGroup>
+    <PropertyGroup Condition="'$(ArtifactsPath)' == ''">
         <UseArtifactsOutput>true</UseArtifactsOutput>
-        <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory)artifacts/</ArtifactsPath>
+        <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts/</ArtifactsPath>
     </PropertyGroup>
 
     <PropertyGroup>
