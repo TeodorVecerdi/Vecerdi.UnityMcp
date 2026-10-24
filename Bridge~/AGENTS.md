@@ -9,16 +9,12 @@ This directory inherits the repository-wide instructions from the consuming repo
 
 ## After changing code in this directory
 
-If you change files under `Bridge~\src\`, republish the MCP server before considering the change complete:
+If you change files under `Bridge~/src/`, republish the MCP server before considering the change complete:
 
 ```powershell
-dotnet publish <path-to>\Bridge~\src\UnityMcp\UnityMcp.csproj -c Release -nologo
+<path-to>/Bridge~/publish.ps1
 ```
 
-## Common publish failure
-
-If publish fails because `unity-mcp.exe` or `unity-mcp.dll` is locked, the running MCP client usually has the published server loaded already. In that case:
-
-1. Stop Copilot CLI or any other MCP client currently using `unity-mcp`.
-2. Run the publish command again.
-3. Restart the client so it picks up the new binary.
+It is safe to run while MCP clients (including the one you are running in) have the server loaded: changed files
+that are in use are set aside as `*.old` instead of failing the publish. Running clients keep the previous build
+until they restart, and the script lists them by PID. Tell the user a client restart is needed to pick the change up.
