@@ -117,7 +117,8 @@ public sealed class McpEditorServer {
 
     private void RegisterCommands() {
         // Debug commands
-        m_Commands.Register(new GetLogsCommand(m_LogBuffer));
+        m_Commands.Register(new GetLogsCommand(m_LogBuffer)); // Used internally by MCP recompile tool
+        m_Commands.Register(new GetLogsTextCommand(m_LogBuffer));
         m_Commands.Register(new ClearLogsCommand(m_LogBuffer, m_Logger));
 
         // Editor commands
@@ -130,7 +131,7 @@ public sealed class McpEditorServer {
         m_Commands.Register(new InvokeManagedMethodCommand());
         m_Commands.Register(new GetInvocationResultCommand());
 
-        // Tool discovery for the stdio bridge (#243) — must see every handler, register last.
+        // Tool discovery for the stdio bridge (#243)
         m_Commands.Register(new ListToolsCommand(m_Commands));
         m_Commands.Register(new RunTestsCommand());
         m_Commands.Register(new GetTestRunStatusCommand());
