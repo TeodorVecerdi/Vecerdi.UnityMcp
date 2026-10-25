@@ -102,13 +102,15 @@ The bridge communicates with Unity via a WebSocket server running in the Editor.
 ├── EditorInstanceRegistry.cs # Dynamic port allocation + discovery file
 ├── Protocol/
 │   └── McpMessage.cs         # Request/Response types
-└── Commands/
-    ├── McpCommandRegistry.cs # Dispatch + IMcpToolProvider/McpToolDescriptor
-    ├── MetaCommands.cs       # unity.bridge.listTools (dynamic tool discovery)
-    ├── EditorCommands.cs     # recompile, playMode, menu items, editor info
-    ├── ManagedInvocationCommands.cs # reflection invoke + pending-invocation registry
-    ├── Console/              # log buffer, get_logs, clear_logs (+ structured getLogs for sync_and_compile)
-    └── Tests/                # run store + summary formatter, runTests, get_test_run_status, cancel_test_run
+└── Commands/                   # one handler per file; Bridge*Command = unity.bridge.* (called by name from the bridge)
+    ├── McpCommandRegistry.cs   # Dispatch + IMcpToolProvider/McpToolDescriptor
+    ├── BridgeListToolsCommand.cs # unity.bridge.listTools (dynamic tool discovery)
+    ├── ExecuteMenuItemCommand.cs # execute_menu_item
+    ├── Compilation/            # recompile, compilation status, asset refresh (sync_and_compile, refresh_assets)
+    ├── Console/                # log buffer, get_logs, clear_logs (+ structured getLogs for sync_and_compile)
+    ├── Invocation/             # reflection invoke, get_invocation_result, pending-invocation registry
+    ├── PlayMode/               # get_play_mode_state, set_play_mode
+    └── Tests/                  # run store + summary formatter, runTests, get_test_run_status, cancel_test_run
 ```
 
 ## Development
