@@ -8,7 +8,7 @@ namespace Vecerdi.UnityMcp.Commands;
 /// Handler for a specific MCP command.
 /// </summary>
 public interface IMcpCommandHandler {
-    /// <summary>The command path this handler responds to (e.g., "unity.debug.getLogs").</summary>
+    /// <summary>The command path this handler responds to (e.g., "unity.bridge.getLogs").</summary>
     string Command { get; }
 
     /// <summary>Execute the command and return a response.</summary>
@@ -17,7 +17,7 @@ public interface IMcpCommandHandler {
 
 /// <summary>
 /// How a command presents itself as an agent-facing MCP tool (todo #243). The stdio bridge
-/// fetches these via <c>unity.meta.listTools</c> when it connects and serves them as dynamic
+/// fetches these via <c>unity.bridge.listTools</c> when it connects and serves them as dynamic
 /// tools, so adding a tool needs no bridge rebuild. The bridge injects its own <c>port</c>
 /// parameter into every schema; the response the agent sees is this command's raw result JSON
 /// (no bridge-side formatting) — write results to be self-describing.

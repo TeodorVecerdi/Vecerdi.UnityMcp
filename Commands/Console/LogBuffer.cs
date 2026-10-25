@@ -1,23 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using Microsoft.Extensions.Logging;
 using UnityEngine;
-using Vecerdi.UnityMcp.Protocol;
-using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Vecerdi.UnityMcp.Commands;
-
-/// <summary>
-/// Captured log entry from Unity console.
-/// </summary>
-public sealed class LogEntry {
-    public string Level { get; init; } = "info";
-    public string Message { get; init; } = string.Empty;
-    public string? StackTrace { get; init; }
-    public DateTimeOffset Timestamp { get; init; }
-}
 
 /// <summary>
 /// Captures and stores Unity console logs.
@@ -129,54 +115,4 @@ public sealed class LogBuffer : IDisposable {
         "info" => 1,
         _ => 0,
     };
-}
-
-/// <summary>
-/// Command: unity.debug.getLogs - Get recent console log entries.
-/// </summary>
-public sealed class GetLogsCommand(LogBuffer logBuffer) : IMcpCommandHandler {
-    public string Command => "unity.debug.getLogs";
-
-    public McpResponse Execute(McpRequest request) {
-        var count = request.GetParam("count", 100);
-        var minLevel = request.GetParam<string>("minLevel");
-        var filter = request.GetParam<string>("filter");
-
-        var logs = logBuffer.GetLogs(count, minLevel, filter);
-
-        return McpResponse.Ok(request.Id, new {
-            logs,
-            total = logs.Count,
-            droppedSinceStart = logBuffer.DroppedSinceStart,
-            capacity = logBuffer.MaxSize,
-        });
-    }
-}
-
-/// <summary>
-/// Command: unity.debug.clearLogs - Clear the log buffer and Unity Console.
-/// </summary>
-public sealed class ClearLogsCommand(LogBuffer logBuffer, ILogger? logger = null) : IMcpCommandHandler, IMcpToolProvider {
-    public string Command => "unity.debug.clearLogs";
-
-    public McpToolDescriptor ToolDescriptor { get; } = new(
-        "clear_logs",
-        "Clear the Unity console log buffer.",
-        """{"type":"object","properties":{}}""");
-
-    public McpResponse Execute(McpRequest request) {
-        // Clear our internal buffer
-        logBuffer.Clear();
-
-        // Clear Unity's Console window using reflection (internal API)
-        try {
-            var logEntriesType = Type.GetType("UnityEditor.LogEntries, UnityEditor");
-            var clearMethod = logEntriesType?.GetMethod("Clear", BindingFlags.Static | BindingFlags.Public);
-            clearMethod?.Invoke(null, null);
-        } catch (Exception ex) {
-            logger?.LogWarning(ex, "Failed to clear Unity Console");
-        }
-
-        return McpResponse.Ok(request.Id, new { cleared = true });
-    }
 }

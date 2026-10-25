@@ -11,7 +11,7 @@ public sealed class McpRequest {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
-    /// <summary>Command to execute (e.g., "unity.debug.getLogs").</summary>
+    /// <summary>Command to execute (e.g., "unity.bridge.getLogs").</summary>
     [JsonPropertyName("command")]
     public string Command { get; set; } = string.Empty;
 

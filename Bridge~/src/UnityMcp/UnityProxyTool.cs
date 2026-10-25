@@ -8,16 +8,12 @@ namespace UnityMcp;
 
 /// <summary>
 /// An MCP tool discovered from a Unity editor at runtime (todo #243): its name, description,
-/// and input schema come from the editor's <c>unity.meta.listTools</c> command, and invoking it
+/// and input schema come from the editor's <c>unity.bridge.listTools</c> command, and invoking it
 /// forwards the arguments verbatim to the corresponding Unity command. The bridge injects its
 /// standard <c>port</c> parameter into the schema and strips it back out before forwarding, so
 /// dynamic tools route between editors exactly like native ones.
 /// </summary>
 public sealed class UnityProxyTool : McpServerTool {
-    private const string PortParamDescription =
-        "Optional Unity Editor port to target. When omitted, the call attaches to the editor chosen via " +
-        "'select_editor', or to the only running editor when exactly one exists. Use 'list_editors' to see ports.";
-
     private static readonly JsonSerializerOptions s_OutputJson = new() {
         WriteIndented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -54,7 +50,7 @@ public sealed class UnityProxyTool : McpServerTool {
 
         properties["port"] = new JsonObject {
             ["type"] = "integer",
-            ["description"] = PortParamDescription,
+            ["description"] = UnityTools.PortParamDescription,
         };
 
         return JsonSerializer.SerializeToElement(root);
@@ -96,7 +92,11 @@ public sealed class UnityProxyTool : McpServerTool {
             return Result(errorText, isError: true);
         }
 
-        return Result(response.Result is { } result ? JsonSerializer.Serialize(result, s_OutputJson) : "OK.", isError: false);
+        if (response.Result is not { } result)
+            return Result("OK.", isError: false);
+        if (result.ValueKind is JsonValueKind.String)
+            return Result(result.GetString()!, isError: false);
+        return Result(JsonSerializer.Serialize(result, s_OutputJson), isError: false);
     }
 
     private static CallToolResult Result(string text, bool isError) => new() {

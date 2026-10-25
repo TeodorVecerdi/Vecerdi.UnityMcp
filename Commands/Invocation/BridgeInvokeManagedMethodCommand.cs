@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -15,112 +14,11 @@ using Object = UnityEngine.Object;
 namespace Vecerdi.UnityMcp.Commands;
 
 /// <summary>
-/// Tasks returned by invoked methods that outlived the bounded wait. Entries are handed out
-/// once (removed when a completed/faulted result is retrieved) and expire after an hour or on
-/// domain reload — a pending invocation is a live poll target, not durable storage.
+/// Command: unity.bridge.invokeManagedMethod - Invoke a managed method via reflection.
 /// </summary>
 [NoAutoStaticsCleanup]
-internal static class PendingInvocationRegistry {
-    private sealed record Entry(Task Task, string Method, DateTime StartedUtc);
-
-    private static readonly ConcurrentDictionary<string, Entry> s_Entries = new();
-    private static readonly TimeSpan s_MaxAge = TimeSpan.FromHours(1);
-
-    public static string Register(Task task, string method) {
-        foreach (var (key, entry) in s_Entries) {
-            if (DateTime.UtcNow - entry.StartedUtc > s_MaxAge) {
-                s_Entries.TryRemove(key, out _);
-            }
-        }
-
-        var id = Guid.NewGuid().ToString("N")[..12];
-        s_Entries[id] = new Entry(task, method, DateTime.UtcNow);
-        return id;
-    }
-
-    public static bool TryGet(string id, out Task task, out string method, out TimeSpan elapsed) {
-        if (s_Entries.TryGetValue(id, out var entry)) {
-            task = entry.Task;
-            method = entry.Method;
-            elapsed = DateTime.UtcNow - entry.StartedUtc;
-            return true;
-        }
-
-        task = null!;
-        method = string.Empty;
-        elapsed = default;
-        return false;
-    }
-
-    public static void Remove(string id) => s_Entries.TryRemove(id, out _);
-
-    /// <summary>Invocations still being polled for (or never claimed and not yet expired).</summary>
-    public static int Count => s_Entries.Count;
-}
-
-/// <summary>
-/// Command: unity.managed.getInvocationResult - Poll a pending invocation started by
-/// unity.managed.invokeMethod (todo #387).
-/// </summary>
-public sealed class GetInvocationResultCommand : IMcpCommandHandler, IMcpToolProvider {
-    public string Command => "unity.managed.getInvocationResult";
-
-    public McpToolDescriptor ToolDescriptor { get; } = new(
-        "get_invocation_result",
-        "Poll the outcome of a backgrounded invoke_managed_method call. When invoke_managed_method returns {pending: true, invocationId}, the invoked Task kept running without blocking the editor; call this with that invocationId until status is 'completed' (includes returnValue) or the call reports the failure. Results are handed out once - the pending entry is removed on a completed/faulted poll, and unclaimed entries expire after ~1 hour or on domain reload.",
-        """{"type":"object","properties":{"invocationId":{"type":"string","description":"The invocationId returned by a pending invoke_managed_method call"}},"required":["invocationId"]}""");
-
-    public McpResponse Execute(McpRequest request) {
-        var invocationId = request.GetParam<string>("invocationId");
-        if (string.IsNullOrWhiteSpace(invocationId)) {
-            return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, "invocationId is required");
-        }
-
-        if (!PendingInvocationRegistry.TryGet(invocationId, out var task, out var method, out var elapsed)) {
-            return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, $"Unknown or expired invocationId '{invocationId}' (results are handed out once; entries expire after an hour or on domain reload).");
-        }
-
-        if (!task.IsCompleted) {
-            return McpResponse.Ok(request.Id, new Dictionary<string, object?> {
-                ["status"] = "running",
-                ["method"] = method,
-                ["elapsedSeconds"] = Math.Round(elapsed.TotalSeconds, 1),
-            });
-        }
-
-        PendingInvocationRegistry.Remove(invocationId);
-
-        if (task.IsCanceled) {
-            return McpResponse.Fail(request.Id, McpErrorCodes.ExecutionFailed, $"Invocation '{method}' was cancelled.");
-        }
-
-        if (task.IsFaulted) {
-            var inner = task.Exception?.GetBaseException() ?? new Exception("Unknown failure");
-            return McpResponse.Fail(
-                request.Id,
-                McpErrorCodes.ExecutionFailed,
-                $"Invocation '{method}' failed: {inner.Message}",
-                new {
-                    exception = inner.GetType().FullName,
-                    stackTrace = inner.StackTrace,
-                }
-            );
-        }
-
-        return McpResponse.Ok(request.Id, new Dictionary<string, object?> {
-            ["status"] = "completed",
-            ["method"] = method,
-            ["returnValue"] = InvokeManagedMethodCommand.SerializeResult(InvokeManagedMethodCommand.ExtractTaskResult(task)),
-        });
-    }
-}
-
-/// <summary>
-/// Command: unity.managed.invokeMethod - Invoke a managed method via reflection.
-/// </summary>
-[NoAutoStaticsCleanup]
-public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
-    public string Command => "unity.managed.invokeMethod";
+public sealed class BridgeInvokeManagedMethodCommand : IMcpCommandHandler {
+    public string Command => "unity.bridge.invokeManagedMethod";
 
     /// <summary>Default bounded wait for Task-returning methods. Must stay well under the
     /// bridge's 30s per-request timeout.</summary>
@@ -249,7 +147,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
             }
 
             var awaitedTask = false;
-            object? returnValue = invocationResult;
+            var returnValue = invocationResult;
 
             if (invocationResult is Task task) {
                 awaitedTask = true;
@@ -407,12 +305,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         return true;
     }
 
-    private static bool TryConvertArguments(
-        JsonElement[] rawArguments,
-        ParameterInfo[] parameters,
-        out object?[]? convertedArguments,
-        out string? error
-    ) {
+    private static bool TryConvertArguments(JsonElement[] rawArguments, ParameterInfo[] parameters, out object?[]? convertedArguments, out string? error) {
         if (rawArguments.Length > parameters.Length) {
             convertedArguments = null;
             error = $"Too many arguments. Method expects {parameters.Length}, received {rawArguments.Length}.";
@@ -517,14 +410,8 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         }
     }
 
-    private static bool TryCreateInstance(
-        Type targetType,
-        JsonElement[] constructorArguments,
-        bool includeNonPublic,
-        out object? instance,
-        out string? error
-    ) {
-        if (targetType.IsAbstract && targetType.IsSealed) {
+    private static bool TryCreateInstance(Type targetType, JsonElement[] constructorArguments, bool includeNonPublic, out object? instance, out string? error) {
+        if (targetType is { IsAbstract: true, IsSealed: true }) {
             instance = null;
             error = $"Type '{targetType.FullName}' is static and cannot be instantiated.";
             return false;
@@ -630,7 +517,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         }
 
         try {
-            var wrapper = typeof(InvokeManagedMethodCommand)
+            var wrapper = typeof(BridgeInvokeManagedMethodCommand)
                 .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
                 .First(m => m.Name == nameof(AwaitAsTask) && m.IsGenericMethodDefinition);
             return (Task?)wrapper.MakeGenericMethod(type.GetGenericArguments()).Invoke(null, [invocationResult]);

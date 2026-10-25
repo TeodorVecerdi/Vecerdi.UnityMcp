@@ -8,7 +8,7 @@ namespace UnityMcp;
 /// <summary>
 /// Discovers agent-facing tools from Unity editors at runtime (todo #243). Whenever a pooled
 /// editor connection (re)opens — including after domain reloads, when the editor's tool set may
-/// have changed — this fetches <c>unity.meta.listTools</c> and reconciles the results into the
+/// have changed — this fetches <c>unity.bridge.listTools</c> and reconciles the results into the
 /// server's tool collection as <see cref="UnityProxyTool"/>s. The SDK raises
 /// <c>notifications/tools/list_changed</c> off collection changes, so clients re-query on their
 /// own. Native (attributed) tools always win name collisions: dynamic registration skips names
@@ -50,10 +50,10 @@ public sealed class DynamicToolManager(UnityConnectionPool pool, IServiceProvide
 
     /// <summary>Fetch the editor's advertised tools and reconcile the server's tool collection.</summary>
     public async Task RefreshAsync(IUnityConnection unity, CancellationToken ct) {
-        var response = await unity.SendAsync("unity.meta.listTools", null, ct);
+        var response = await unity.SendAsync("unity.bridge.listTools", null, ct);
         if (!response.Success || response.Result is not { } result) {
             // Older Unity-side plugin without discovery — nothing to serve dynamically.
-            logger.LogDebug("Editor at {Uri} does not support unity.meta.listTools", unity.CurrentUri);
+            logger.LogDebug("Editor at {Uri} does not support unity.bridge.listTools", unity.CurrentUri);
             return;
         }
 
