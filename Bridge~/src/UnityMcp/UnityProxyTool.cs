@@ -96,7 +96,11 @@ public sealed class UnityProxyTool : McpServerTool {
             return Result(errorText, isError: true);
         }
 
-        return Result(response.Result is { } result ? JsonSerializer.Serialize(result, s_OutputJson) : "OK.", isError: false);
+        if (response.Result is not { } result)
+            return Result("OK.", isError: false);
+        if (result.ValueKind is JsonValueKind.String)
+            return Result(result.GetString()!, isError: false);
+        return Result(JsonSerializer.Serialize(result, s_OutputJson), isError: false);
     }
 
     private static CallToolResult Result(string text, bool isError) => new() {
