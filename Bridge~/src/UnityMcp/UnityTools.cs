@@ -439,36 +439,6 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     }
 
     /// <summary>
-    /// Cancel an active Unity test run.
-    /// </summary>
-    [McpServerTool(Name = "cancel_test_run"), Description("Cancel an active Unity test run. If runId is omitted, cancels the currently running run.")]
-    public async Task<CallToolResult> CancelTestRun(
-        [Description("Optional run identifier returned by run_tests")] string? runId = null,
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-
-        object? parameters = string.IsNullOrWhiteSpace(runId) ? null : new { runId };
-        var response = await unity!.SendAsync("unity.editor.cancelTestRun", parameters, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        var cancelledRunId = runId;
-        if (response.Result is { } result
-            && result.TryGetProperty("runId", out var resultRunIdElement)
-            && resultRunIdElement.ValueKind == JsonValueKind.String) {
-            cancelledRunId = resultRunIdElement.GetString();
-        }
-
-        if (string.IsNullOrWhiteSpace(cancelledRunId)) {
-            return Success("Requested test run cancellation.");
-        }
-
-        return Success($"Requested cancellation for test run {cancelledRunId}.");
-    }
-
-    /// <summary>
     /// List all available Unity Editor instances.
     /// </summary>
     [McpServerTool(Name = "list_editors"), Description("List all available Unity Editor instances that can be controlled via MCP. Each editor has its own pooled connection; pass a tool's 'port' parameter to target a specific one. Markers show which editors currently have a live pooled connection and which is the default target.")]

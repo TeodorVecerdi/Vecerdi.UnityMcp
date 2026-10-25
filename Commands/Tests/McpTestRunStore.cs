@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Unity.Scripting.LifecycleManagement;
 using UnityEditor.TestTools.TestRunner.Api;
@@ -29,7 +30,7 @@ internal static class McpTestRunStore {
         }
     }
 
-    public static bool TryGetRunningRun(out string? runId) {
+    public static bool TryGetRunningRun([NotNullWhen(true)] out string? runId) {
         lock (s_Lock) {
             var running = s_Runs.Values.FirstOrDefault(r => string.Equals(r.Status, "running", StringComparison.OrdinalIgnoreCase));
             runId = running?.RunId;
@@ -37,17 +38,17 @@ internal static class McpTestRunStore {
         }
     }
 
-    public static bool TryGetLatestRunId(out string? runId) {
+    public static bool TryGetLatestRunId([NotNullWhen(true)] out string? runId) {
         lock (s_Lock) {
             runId = s_LatestRunId;
             return !string.IsNullOrWhiteSpace(runId);
         }
     }
 
-    public static bool TryGetSnapshot(string runId, out object snapshot) {
+    public static bool TryGetSnapshot(string runId, [NotNullWhen(true)] out object? snapshot) {
         lock (s_Lock) {
             if (!s_Runs.TryGetValue(runId, out var state)) {
-                snapshot = null!;
+                snapshot = null;
                 return false;
             }
 
@@ -56,14 +57,13 @@ internal static class McpTestRunStore {
         }
     }
 
-    public static bool TryGetRunForCancellation(string runId, out TestRunState runState) {
+    public static bool TryGetRunForCancellation(string runId, [NotNullWhen(true)] out TestRunState? runState) {
         lock (s_Lock) {
-            if (s_Runs.TryGetValue(runId, out runState!)
-             && string.Equals(runState.Status, "running", StringComparison.OrdinalIgnoreCase)) {
+            if (s_Runs.TryGetValue(runId, out runState) && string.Equals(runState.Status, "running", StringComparison.OrdinalIgnoreCase)) {
                 return true;
             }
 
-            runState = null!;
+            runState = null;
             return false;
         }
     }

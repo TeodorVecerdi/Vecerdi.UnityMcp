@@ -17,7 +17,7 @@ public sealed class GetTestRunStatusCommand : IMcpCommandHandler {
             }
         }
 
-        if (!McpTestRunStore.TryGetSnapshot(runId!, out var snapshot)) {
+        if (!McpTestRunStore.TryGetSnapshot(runId, out var snapshot)) {
             return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, $"No test run found for runId '{runId}'.");
         }
 
