@@ -134,7 +134,8 @@ public sealed class McpEditorServer {
         // Tool discovery for the stdio bridge (#243)
         m_Commands.Register(new ListToolsCommand(m_Commands));
         m_Commands.Register(new RunTestsCommand());
-        m_Commands.Register(new GetTestRunStatusCommand());
+        m_Commands.Register(new GetTestRunStatusCommand()); // Used internally by MCP run_tests tool
+        m_Commands.Register(new GetTestRunStatusSummaryCommand());
         m_Commands.Register(new CancelTestRunCommand());
     }
 

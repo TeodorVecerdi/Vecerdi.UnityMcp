@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Text;
 using Unity.Scripting.LifecycleManagement;
 using UnityEditor.TestTools.TestRunner.Api;
 using Object = UnityEngine.Object;
@@ -45,14 +46,16 @@ internal static class McpTestRunStore {
         }
     }
 
-    public static bool TryGetSnapshot(string runId, [NotNullWhen(true)] out object? snapshot) {
+    public static bool TryGetRunSummary(string runId, [NotNullWhen(true)] out string? status, [NotNullWhen(true)] out string? summary) {
         lock (s_Lock) {
-            if (!s_Runs.TryGetValue(runId, out var state)) {
-                snapshot = null;
+            if (!s_Runs.TryGetValue(runId, out var testRunState)) {
+                status = null;
+                summary = null;
                 return false;
             }
 
-            snapshot = state.ToSnapshot();
+            status = testRunState.Status;
+            summary = testRunState.GetSummary();
             return true;
         }
     }
@@ -220,43 +223,90 @@ internal static class McpTestRunStore {
         public DateTimeOffset? FinishedAtUtc { get; set; }
         public List<TestFailure> FailedTests { get; } = [];
 
-        public object ToSnapshot() {
-            var failures = FailedTests
-                .Take(200)
-                .Select(f => new {
-                    name = f.Name,
-                    message = f.Message,
-                    stackTrace = f.StackTrace,
-                    output = f.Output,
-                    durationMs = f.DurationMs,
-                })
-                .ToList();
+        public string GetSummary() {
+            var sb = new StringBuilder();
 
-            return new {
-                runId = RunId,
-                sessionId = SessionId,
-                status = Status,
-                cancelRequested = CancelRequested,
-                filter = Filter is null ? null : SerializeFilter(Filter),
-                totals = new {
-                    discovered = TotalDiscoveredTests,
-                    executed = ExecutedTests,
-                    passed = Passed,
-                    failed = Failed,
-                    skipped = Skipped,
-                    inconclusive = Inconclusive,
-                    other = Other,
-                },
-                lastStartedTest = LastStartedTest,
-                message = RunMessage,
-                createdAtUtc = CreatedAtUtc,
-                startedAtUtc = StartedAtUtc,
-                lastUpdatedAtUtc = LastUpdatedUtc,
-                finishedAtUtc = FinishedAtUtc,
-                failures,
-                failureCount = FailedTests.Count,
-                failuresTruncated = FailedTests.Count > failures.Count,
+            // 'ran' (executed) is the count the filter actually matched and ran; 'discovered' is the ENTIRE test
+            // tree in the editor (all modes), which is NOT the filter-matched count - keeping them as separate
+            // labelled numbers stops "5 passed" from being mistaken for "the filter matched exactly those 5".
+            var summaryLine = Failed > 0
+                ? $"Unity tests {Status.ToUpperInvariant()}: {Failed} failed, {Passed} passed of {ExecutedTests} ran"
+                : $"Unity tests {Status.ToUpperInvariant()}: {Passed} passed of {ExecutedTests} ran";
+
+            if (Skipped > 0 || Inconclusive > 0 || Other > 0) {
+                summaryLine += $" | skipped {Skipped}, inconclusive {Inconclusive}, other {Other}";
+            }
+
+            sb.AppendLine(summaryLine);
+            sb.AppendLine($"status: {Status}");
+            sb.AppendLine($"matched & ran: {ExecutedTests}, passed: {Passed}, failed: {Failed}, skipped: {Skipped}, inconclusive: {Inconclusive}, other: {Other}");
+            sb.AppendLine($"discovered (entire test tree, all modes - NOT the filter-matched count): {TotalDiscoveredTests}");
+
+            sb.AppendLine($"resolved filter: {DescribeResolvedFilter(Filter)}");
+            if (ExecutedTests == 0 && !string.Equals(Status, "running", StringComparison.OrdinalIgnoreCase)) {
+                sb.AppendLine("WARNING: the filter matched 0 tests - check the resolved filter above (wrong assembly/test name or mode?).");
+            }
+
+            sb.AppendLine($"runId: {RunId}");
+
+            if (!string.IsNullOrWhiteSpace(RunMessage)) {
+                sb.AppendLine();
+                sb.AppendLine($"message: {RunMessage}");
+            }
+
+            if (FailedTests.Count > 0) {
+                const int maxFailuresToShow = 25;
+                sb.AppendLine();
+                sb.AppendLine($"failures{(FailedTests.Count > maxFailuresToShow ? $" (showing first {maxFailuresToShow} of {FailedTests.Count})" : "")}:");
+
+                foreach (var failure in FailedTests.Take(maxFailuresToShow)) {
+                    sb.AppendLine($"- {failure.Name}");
+                    if (!string.IsNullOrWhiteSpace(failure.Message)) {
+                        sb.AppendLine($"  message:\n{failure.Message}");
+                        sb.AppendLine();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(failure.StackTrace)) {
+                        sb.AppendLine($"  stack: {failure.StackTrace}");
+                        sb.AppendLine();
+                    }
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static string DescribeResolvedFilter(Filter? filter) {
+            if (filter is null) {
+                return "(none reported)";
+            }
+
+            var parts = new List<string> {
+                $"testMode={filter.testMode}",
             };
+
+            var scopingParts = new List<string>();
+            AppendArray("assemblyNames", filter.assemblyNames, scopingParts);
+            AppendArray("testNames", filter.testNames, scopingParts);
+            AppendArray("categoryNames", filter.categoryNames, scopingParts);
+            AppendArray("groupNames", filter.groupNames, scopingParts);
+
+            if (filter.targetPlatform is { } targetPlatform) {
+                scopingParts.Add($"targetPlatform={targetPlatform}");
+            }
+
+            parts.AddRange(scopingParts);
+            if (scopingParts.Count == 0) {
+                parts.Add("no name/assembly/category/group filter - runs everything in this mode");
+            }
+
+            return string.Join(", ", parts);
+
+            static void AppendArray(string name, string[]? values, List<string> parts) {
+                if (values is { Length: > 0 }) {
+                    parts.Add($"{name}=[{string.Join(", ", values)}]");
+                }
+            }
         }
     }
 

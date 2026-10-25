@@ -408,34 +408,14 @@ public sealed class UnityTools(UnityConnectionPool pool) {
                 : "unknown";
 
             if (!string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)) {
-                return Success(FormatTestRunSummary(statusResult));
+                var summary = statusResult.TryGetProperty("summary", out var s) && s.ValueKind == JsonValueKind.String
+                    ? s.GetString()!
+                    : $"Test run {runId} finished with status '{status}'.";
+                return Success(summary);
             }
         }
 
         return Error($"Timed out waiting for test run completion.\nrunId: {runId}\nUse get_test_run_status to poll manually.");
-    }
-
-    /// <summary>
-    /// Get the status of a Unity test run.
-    /// </summary>
-    [McpServerTool(Name = "get_test_run_status"), Description("Get status and results for a Unity test run. If runId is omitted, returns the LATEST run - but 'latest' is per-editor (pass the matching 'port') and is undefined after a domain reload, which discards in-memory run history; prefer passing the runId that run_tests returned. Output labels matched-and-ran vs the whole-tree discovered count and echoes the resolved filter.")]
-    public async Task<CallToolResult> GetTestRunStatus(
-        [Description("Optional run identifier returned by run_tests")] string? runId = null,
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-
-        object? parameters = string.IsNullOrWhiteSpace(runId) ? null : new { runId };
-        var response = await unity!.SendAsync("unity.editor.getTestRunStatus", parameters, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        if (response.Result is not { } result) {
-            return Error("Unity returned no test run status payload.");
-        }
-
-        return Success(FormatTestRunSummary(result));
     }
 
     /// <summary>

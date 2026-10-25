@@ -3,7 +3,7 @@ using Vecerdi.UnityMcp.Protocol;
 namespace Vecerdi.UnityMcp.Commands;
 
 /// <summary>
-/// Command: unity.editor.getTestRunStatus - Get status and results of a test run.
+/// Get status and results of a test run.
 /// </summary>
 public sealed class GetTestRunStatusCommand : IMcpCommandHandler {
     public string Command => "unity.editor.getTestRunStatus";
@@ -17,10 +17,14 @@ public sealed class GetTestRunStatusCommand : IMcpCommandHandler {
             }
         }
 
-        if (!McpTestRunStore.TryGetSnapshot(runId, out var snapshot)) {
+        if (!McpTestRunStore.TryGetRunSummary(runId, out var status, out var summary)) {
             return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, $"No test run found for runId '{runId}'.");
         }
 
-        return McpResponse.Ok(request.Id, snapshot);
+        return McpResponse.Ok(request.Id, new {
+            runId,
+            status,
+            summary,
+        });
     }
 }
