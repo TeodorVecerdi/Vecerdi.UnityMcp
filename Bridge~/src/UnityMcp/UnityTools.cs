@@ -12,7 +12,7 @@ namespace UnityMcp;
 /// </summary>
 [McpServerToolType]
 public sealed class UnityTools(UnityConnectionPool pool) {
-    private const string PortParamDescription =
+    internal const string PortParamDescription =
         "Optional Unity Editor port. Omitted: targets the 'select_editor' default, else the only running editor; " +
         "required when several run and no default is set ('list_editors' shows ports). Editor state (default " +
         "selection, latest test run) is per-editor. A call that arrives while the editor is reloading the script " +
@@ -25,10 +25,10 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    // get_logs, clear_logs, execute_menu_item, get_play_mode_state, set_play_mode, and
-    // get_invocation_result are served dynamically (#243): the editor advertises them via
-    // unity.meta.listTools and DynamicToolManager registers them on connect. Only tools with
-    // bridge-side logic (multi-step waits, formatting, discovery) stay native here.
+    // get_logs, clear_logs, get_test_run_status, cancel_test_run, execute_menu_item,
+    // get_play_mode_state, set_play_mode, and get_invocation_result are served dynamically (#243):
+    // the editor advertises them via unity.bridge.listTools and DynamicToolManager registers them on
+    // connect. Only tools with bridge-side logic (multi-step waits, discovery) stay native here.
 
     private const string SyncAndCompileDescription =
         "THE default 'make my code edits take effect' call: waits out any in-flight import/compile, refreshes the " +
@@ -93,7 +93,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         // Step 2: Trigger recompile. The plugin's recompile command refreshes the Asset Database and then
         // calls RequestScriptCompilation, so this single command performs both the refresh and the compile.
         try {
-            var recompileResponse = await unity.SendAsync("unity.editor.recompile", null, ct);
+            var recompileResponse = await unity.SendAsync("unity.bridge.recompile", null, ct);
             if (!recompileResponse.Success && recompileResponse.Error is not null) {
                 // e.g. "cannot recompile in play mode" - surface directly; nothing was triggered.
                 return Error(recompileResponse.Error.Message);
@@ -146,7 +146,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         // compile (and possibly a reload) follows and the marker covers it too.
         var refreshTriggeredMore = true;
         try {
-            var refreshResponse = await unity.SendAsync("unity.editor.refreshAssets", null, ct);
+            var refreshResponse = await unity.SendAsync("unity.bridge.refreshAssets", null, ct);
             if (refreshResponse.Success) {
                 await Task.Delay(250, ct);
                 refreshTriggeredMore = await IsCompilingOrUpdatingAsync(unity, ct) != false;
@@ -180,7 +180,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested) {
             try {
-                var statusResponse = await unity.SendAsync("unity.editor.getCompilationStatus", null, ct);
+                var statusResponse = await unity.SendAsync("unity.bridge.getCompilationStatus", null, ct);
                 if (statusResponse is { Success: true, Result: not null }) {
                     var isCompiling = statusResponse.Result.Value.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
                     var isUpdating = statusResponse.Result.Value.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
@@ -204,7 +204,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         var prefix = note is null ? "" : note + "\n\n";
         UnityResponse logsResponse;
         try {
-            logsResponse = await unity.SendAsync("unity.debug.getLogs", new { count = 200, minLevel = "error" }, ct);
+            logsResponse = await unity.SendAsync("unity.bridge.getLogs", new { count = 200, minLevel = "error" }, ct);
         } catch {
             return Error("Recompile triggered, but the console log could not be read to confirm the result. Check the Unity Editor manually.");
         }
@@ -261,7 +261,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     ) {
         var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
         if (connectionError is not null) return connectionError;
-        var response = await unity!.SendAsync("unity.editor.refreshAssets", null, ct);
+        var response = await unity!.SendAsync("unity.bridge.refreshAssets", null, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         // Refresh() returns after queuing an import; a triggered compile flips isCompiling/isUpdating shortly
@@ -283,7 +283,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
     /// </summary>
     private static async Task<bool?> IsCompilingOrUpdatingAsync(IUnityConnection unity, CancellationToken ct) {
         try {
-            var statusResponse = await unity.SendAsync("unity.editor.getCompilationStatus", null, ct);
+            var statusResponse = await unity.SendAsync("unity.bridge.getCompilationStatus", null, ct);
             if (statusResponse is { Success: true, Result: not null }) {
                 var isCompiling = statusResponse.Result.Value.TryGetProperty("isCompiling", out var c) && c.GetBoolean();
                 var isUpdating = statusResponse.Result.Value.TryGetProperty("isUpdating", out var u) && u.GetBoolean();
@@ -333,7 +333,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         if (genericTypeNames is { Length: > 0 }) parameters["genericTypeNames"] = genericTypeNames;
         if (waitMs is { } wait) parameters["waitMs"] = wait;
 
-        var response = await unity!.SendAsync("unity.managed.invokeMethod", parameters, ct);
+        var response = await unity!.SendAsync("unity.bridge.invokeManagedMethod", parameters, ct);
         if (ToErrorResult(response) is { } errorResult) return errorResult;
 
         if (response.Result is not { } result) {
@@ -373,7 +373,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         if (groupNames is { Length: > 0 }) parameters["groupNames"] = groupNames;
         if (!string.IsNullOrWhiteSpace(targetPlatform)) parameters["targetPlatform"] = targetPlatform;
 
-        var startResponse = await unity!.SendAsync("unity.editor.runTests", parameters, ct);
+        var startResponse = await unity!.SendAsync("unity.bridge.runTests", parameters, ct);
         if (ToErrorResult(startResponse) is { } startError) return startError;
 
         if (startResponse.Result is not { } startResult) {
@@ -396,7 +396,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested) {
             await Task.Delay(pollDelay, ct);
 
-            var statusResponse = await unity!.SendAsync("unity.editor.getTestRunStatus", new { runId }, ct);
+            var statusResponse = await unity!.SendAsync("unity.bridge.getTestRunStatus", new { runId }, ct);
             if (ToErrorResult(statusResponse) is { } statusError) return statusError;
 
             if (statusResponse.Result is not { } statusResult) {
@@ -505,143 +505,6 @@ public sealed class UnityTools(UnityConnectionPool pool) {
             : "Unity command failed with unknown error";
 
         return Error(errorText);
-    }
-
-    internal static string FormatTestRunSummary(JsonElement result) {
-        var runId = result.TryGetProperty("runId", out var runIdElement) ? runIdElement.GetString() : "<unknown>";
-        var status = result.TryGetProperty("status", out var statusElement) ? statusElement.GetString() : "unknown";
-
-        var discovered = 0;
-        var executed = 0;
-        var passed = 0;
-        var failed = 0;
-        var skipped = 0;
-        var inconclusive = 0;
-        var other = 0;
-
-        if (result.TryGetProperty("totals", out var totals) && totals.ValueKind == JsonValueKind.Object) {
-            discovered = ReadInt(totals, "discovered");
-            executed = ReadInt(totals, "executed");
-            passed = ReadInt(totals, "passed");
-            failed = ReadInt(totals, "failed");
-            skipped = ReadInt(totals, "skipped");
-            inconclusive = ReadInt(totals, "inconclusive");
-            other = ReadInt(totals, "other");
-        }
-
-        var sb = new StringBuilder();
-        var statusLabel = string.IsNullOrWhiteSpace(status)
-            ? "UNKNOWN"
-            : status.ToUpperInvariant();
-        // 'ran' (executed) is the count the filter actually matched and ran; 'discovered' is the ENTIRE test
-        // tree in the editor (all modes), which is NOT the filter-matched count - keeping them as separate
-        // labelled numbers stops "5 passed" from being mistaken for "the filter matched exactly those 5".
-        var summaryLine = failed > 0
-            ? $"Unity tests {statusLabel}: {failed} failed, {passed} passed of {executed} ran"
-            : $"Unity tests {statusLabel}: {passed} passed of {executed} ran";
-
-        if (skipped > 0 || inconclusive > 0 || other > 0) {
-            summaryLine += $" | skipped {skipped}, inconclusive {inconclusive}, other {other}";
-        }
-
-        sb.AppendLine(summaryLine);
-        sb.AppendLine($"status: {status}");
-        sb.AppendLine($"matched & ran: {executed}, passed: {passed}, failed: {failed}, skipped: {skipped}, inconclusive: {inconclusive}, other: {other}");
-        sb.AppendLine($"discovered (entire test tree, all modes - NOT the filter-matched count): {discovered}");
-
-        var filterLine = DescribeResolvedFilter(result);
-        sb.AppendLine($"resolved filter: {filterLine}");
-        if (executed == 0 && !string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)) {
-            sb.AppendLine("WARNING: the filter matched 0 tests - check the resolved filter above (wrong assembly/test name or mode?).");
-        }
-
-        sb.AppendLine($"runId: {runId}");
-
-        if (result.TryGetProperty("message", out var messageElement)
-            && messageElement.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(messageElement.GetString())) {
-            sb.AppendLine();
-            sb.AppendLine($"message: {messageElement.GetString()}");
-        }
-
-        if (result.TryGetProperty("failures", out var failures) && failures.ValueKind == JsonValueKind.Array && failures.GetArrayLength() > 0) {
-            sb.AppendLine();
-            sb.AppendLine("failures:");
-
-            foreach (var failure in failures.EnumerateArray().Take(25)) {
-                var name = failure.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : "<unknown test>";
-                var message = failure.TryGetProperty("message", out var failureMessageElement) ? failureMessageElement.GetString() : null;
-                var stackTrace = failure.TryGetProperty("stackTrace", out var stackTraceElement) ? stackTraceElement.GetString() : null;
-
-                sb.AppendLine($"- {name}");
-                if (!string.IsNullOrWhiteSpace(message)) {
-                    sb.AppendLine($"  message:\n{message}");
-                    sb.AppendLine();
-                }
-
-                if (!string.IsNullOrWhiteSpace(stackTrace)) {
-                    sb.AppendLine($"  stack: {stackTrace}");
-                    sb.AppendLine();
-                }
-            }
-        }
-
-        return sb.ToString();
-    }
-
-    private static int ReadInt(JsonElement element, string propertyName) {
-        if (!element.TryGetProperty(propertyName, out var value)) return 0;
-        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : 0;
-    }
-
-    /// <summary>
-    /// Render the filter Unity actually applied (echoed back in the run snapshot) so the caller can confirm
-    /// the run matched what they intended rather than trusting a bare pass count.
-    /// </summary>
-    internal static string DescribeResolvedFilter(JsonElement result) {
-        if (!result.TryGetProperty("filter", out var filter) || filter.ValueKind != JsonValueKind.Object) {
-            return "(none reported)";
-        }
-
-        var parts = new List<string>();
-
-        if (filter.TryGetProperty("testMode", out var mode) && mode.ValueKind == JsonValueKind.String) {
-            parts.Add($"testMode={mode.GetString()}");
-        }
-
-        // Track scoping filters (name/assembly/category/group/platform) separately from testMode: testMode
-        // alone runs the whole mode, so we annotate that case rather than implying a narrow selection.
-        var scopingParts = new List<string>();
-        AppendArray(filter, "assemblyNames", scopingParts);
-        AppendArray(filter, "testNames", scopingParts);
-        AppendArray(filter, "categoryNames", scopingParts);
-        AppendArray(filter, "groupNames", scopingParts);
-
-        if (filter.TryGetProperty("targetPlatform", out var platform) && platform.ValueKind == JsonValueKind.String) {
-            scopingParts.Add($"targetPlatform={platform.GetString()}");
-        }
-
-        parts.AddRange(scopingParts);
-
-        if (scopingParts.Count == 0) {
-            parts.Add("no name/assembly/category/group filter - runs everything in this mode");
-        }
-
-        return parts.Count == 0 ? "(none reported)" : string.Join(", ", parts);
-
-        static void AppendArray(JsonElement filter, string name, List<string> parts) {
-            if (!filter.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array || array.GetArrayLength() == 0) {
-                return;
-            }
-
-            var values = array.EnumerateArray()
-                .Where(e => e.ValueKind == JsonValueKind.String)
-                .Select(e => e.GetString())
-                .ToList();
-            if (values.Count > 0) {
-                parts.Add($"{name}=[{string.Join(", ", values)}]");
-            }
-        }
     }
 
     private static CallToolResult Success(string message) => new() {

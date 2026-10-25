@@ -57,8 +57,8 @@ public sealed class SyncAndCompileTests {
     public async Task InFlightCompile_NothingNewer_SkipsRecompileAndReportsItsErrors() {
         var compileStartedAt = DateTimeOffset.UtcNow.AddSeconds(-4);
         var (editor, commands) = Editor(command => command switch {
-            "unity.editor.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: false, isUpdating: false),
-            "unity.debug.getLogs" => ScriptedUnityConnection.LogsResponse(
+            "unity.bridge.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: false, isUpdating: false),
+            "unity.bridge.getLogs" => ScriptedUnityConnection.LogsResponse(
                 ("error", "NullReferenceException from an earlier play session", compileStartedAt.AddSeconds(-30)),
                 // Logged per assembly while the compile was still running - before this call arrived.
                 ("error", "Assets/Scripts/Foo.cs(12,20): error CS0103: The name 'x' does not exist", compileStartedAt.AddSeconds(2))),
@@ -74,8 +74,8 @@ public sealed class SyncAndCompileTests {
         Assert.Contains("Compilation FAILED with 1 new error", text);
         Assert.Contains("CS0103", text);
         Assert.DoesNotContain("NullReferenceException", text);
-        Assert.Contains("unity.editor.refreshAssets", commands);
-        Assert.DoesNotContain("unity.editor.recompile", commands);
+        Assert.Contains("unity.bridge.refreshAssets", commands);
+        Assert.DoesNotContain("unity.bridge.recompile", commands);
     }
 
     [Fact]
@@ -85,14 +85,14 @@ public sealed class SyncAndCompileTests {
         var statusPollsAfterRefresh = 0;
         var (editor, commands) = Editor(command => {
             switch (command) {
-                case "unity.editor.refreshAssets":
+                case "unity.bridge.refreshAssets":
                     refreshed = true;
                     return Ok();
-                case "unity.editor.getCompilationStatus":
+                case "unity.bridge.getCompilationStatus":
                     // Idle before the refresh; busy for the first poll after it, then idle again.
                     var busy = refreshed && ++statusPollsAfterRefresh <= 1;
                     return ScriptedUnityConnection.CompilationStatusResponse(isCompiling: busy, isUpdating: false);
-                case "unity.debug.getLogs":
+                case "unity.bridge.getLogs":
                     return ScriptedUnityConnection.LogsResponse();
                 default:
                     return Ok();
@@ -105,15 +105,15 @@ public sealed class SyncAndCompileTests {
         Assert.False(result.IsError ?? false);
         Assert.Contains("newer edits triggered a further compile", text);
         Assert.Contains("no errors", text);
-        Assert.DoesNotContain("unity.editor.recompile", commands);
+        Assert.DoesNotContain("unity.bridge.recompile", commands);
         Assert.True(statusPollsAfterRefresh >= 2, "should have waited for the refresh-triggered compile to settle");
     }
 
     [Fact]
     public async Task NoInFlightCompile_ForcesRecompileAsBefore() {
         var (editor, commands) = Editor(command => command switch {
-            "unity.editor.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: false, isUpdating: false),
-            "unity.debug.getLogs" => ScriptedUnityConnection.LogsResponse(),
+            "unity.bridge.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: false, isUpdating: false),
+            "unity.bridge.getLogs" => ScriptedUnityConnection.LogsResponse(),
             _ => Ok(),
         });
 
@@ -121,7 +121,7 @@ public sealed class SyncAndCompileTests {
         var result = await UnityTools.RunSyncAndCompileAsync(editor, stale, () => stale, CancellationToken.None);
 
         Assert.False(result.IsError ?? false);
-        Assert.Contains("unity.editor.recompile", commands);
+        Assert.Contains("unity.bridge.recompile", commands);
         Assert.DoesNotContain("Joined", TextOf(result));
     }
 
@@ -130,8 +130,8 @@ public sealed class SyncAndCompileTests {
         // Idle at arrival; a compile the user triggered starts and finishes while we drain, leaving its start on record.
         var statusPolls = 0;
         var (editor, commands) = Editor(command => command switch {
-            "unity.editor.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: ++statusPolls <= 1, isUpdating: false),
-            "unity.debug.getLogs" => ScriptedUnityConnection.LogsResponse(),
+            "unity.bridge.getCompilationStatus" => ScriptedUnityConnection.CompilationStatusResponse(isCompiling: ++statusPolls <= 1, isUpdating: false),
+            "unity.bridge.getLogs" => ScriptedUnityConnection.LogsResponse(),
             _ => Ok(),
         });
 
@@ -143,6 +143,6 @@ public sealed class SyncAndCompileTests {
 
         Assert.False(result.IsError ?? false);
         Assert.Contains("Joined a compile that was already running", TextOf(result));
-        Assert.DoesNotContain("unity.editor.recompile", commands);
+        Assert.DoesNotContain("unity.bridge.recompile", commands);
     }
 }

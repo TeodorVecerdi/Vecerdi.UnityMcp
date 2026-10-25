@@ -60,7 +60,7 @@ internal static class PendingInvocationRegistry {
 
 /// <summary>
 /// Command: unity.managed.getInvocationResult - Poll a pending invocation started by
-/// unity.managed.invokeMethod (todo #387).
+/// unity.bridge.invokeManagedMethod (todo #387).
 /// </summary>
 public sealed class GetInvocationResultCommand : IMcpCommandHandler, IMcpToolProvider {
     public string Command => "unity.managed.getInvocationResult";
@@ -110,17 +110,17 @@ public sealed class GetInvocationResultCommand : IMcpCommandHandler, IMcpToolPro
         return McpResponse.Ok(request.Id, new Dictionary<string, object?> {
             ["status"] = "completed",
             ["method"] = method,
-            ["returnValue"] = InvokeManagedMethodCommand.SerializeResult(InvokeManagedMethodCommand.ExtractTaskResult(task)),
+            ["returnValue"] = BridgeInvokeManagedMethodCommand.SerializeResult(BridgeInvokeManagedMethodCommand.ExtractTaskResult(task)),
         });
     }
 }
 
 /// <summary>
-/// Command: unity.managed.invokeMethod - Invoke a managed method via reflection.
+/// Command: unity.bridge.invokeManagedMethod - Invoke a managed method via reflection.
 /// </summary>
 [NoAutoStaticsCleanup]
-public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
-    public string Command => "unity.managed.invokeMethod";
+public sealed class BridgeInvokeManagedMethodCommand : IMcpCommandHandler {
+    public string Command => "unity.bridge.invokeManagedMethod";
 
     /// <summary>Default bounded wait for Task-returning methods. Must stay well under the
     /// bridge's 30s per-request timeout.</summary>
@@ -630,7 +630,7 @@ public sealed class InvokeManagedMethodCommand : IMcpCommandHandler {
         }
 
         try {
-            var wrapper = typeof(InvokeManagedMethodCommand)
+            var wrapper = typeof(BridgeInvokeManagedMethodCommand)
                 .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
                 .First(m => m.Name == nameof(AwaitAsTask) && m.IsGenericMethodDefinition);
             return (Task?)wrapper.MakeGenericMethod(type.GetGenericArguments()).Invoke(null, [invocationResult]);

@@ -12,7 +12,7 @@ public sealed class FreshDiagnosticsTests {
     public async Task BuildFreshDiagnostics_NoErrorsAfterMarker_ReportsSuccess() {
         var marker = DateTimeOffset.UtcNow;
         var connection = new ScriptedUnityConnection((command, _) =>
-            command == "unity.debug.getLogs"
+            command == "unity.bridge.getLogs"
                 ? ScriptedUnityConnection.LogsResponse(("error", "old runtime error", marker.AddSeconds(-5)))
                 : new UnityResponse { Success = true });
 
@@ -26,7 +26,7 @@ public sealed class FreshDiagnosticsTests {
     public async Task BuildFreshDiagnostics_ExcludesStaleErrors_ButReportsFreshOnes() {
         var marker = DateTimeOffset.UtcNow;
         var connection = new ScriptedUnityConnection((command, _) =>
-            command == "unity.debug.getLogs"
+            command == "unity.bridge.getLogs"
                 ? ScriptedUnityConnection.LogsResponse(
                     ("error", "NullReferenceException from a previous play session", marker.AddSeconds(-10)),
                     ("error", "Assets/Scripts/Foo.cs(12,20): error CS0103: The name 'x' does not exist", marker.AddSeconds(2)))
@@ -45,7 +45,7 @@ public sealed class FreshDiagnosticsTests {
     public async Task BuildFreshDiagnostics_UnparseableFreshError_StillSurfacedRaw() {
         var marker = DateTimeOffset.UtcNow;
         var connection = new ScriptedUnityConnection((command, _) =>
-            command == "unity.debug.getLogs"
+            command == "unity.bridge.getLogs"
                 ? ScriptedUnityConnection.LogsResponse(
                     ("error", "Internal compiler error: something exploded", marker.AddSeconds(1)))
                 : new UnityResponse { Success = true });

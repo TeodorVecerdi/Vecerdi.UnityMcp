@@ -39,7 +39,7 @@ internal sealed class ScriptedUnityConnection : IUnityConnection {
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    /// <summary>Build a <c>unity.debug.getLogs</c>-shaped response from the given entries.</summary>
+    /// <summary>Build a <c>unity.bridge.getLogs</c>-shaped response from the given entries.</summary>
     public static UnityResponse LogsResponse(params (string Level, string Message, DateTimeOffset? Timestamp)[] entries) {
         var logs = entries.Select(e => new Dictionary<string, object?> {
             ["level"] = e.Level,
@@ -54,7 +54,7 @@ internal sealed class ScriptedUnityConnection : IUnityConnection {
         return new UnityResponse { Id = "1", Success = true, Result = doc.RootElement.Clone() };
     }
 
-    /// <summary>Build a <c>unity.editor.getCompilationStatus</c>-shaped response.</summary>
+    /// <summary>Build a <c>unity.bridge.getCompilationStatus</c>-shaped response.</summary>
     public static UnityResponse CompilationStatusResponse(bool isCompiling, bool isUpdating) {
         var json = JsonSerializer.Serialize(new { isCompiling, isUpdating });
         using var doc = JsonDocument.Parse(json);

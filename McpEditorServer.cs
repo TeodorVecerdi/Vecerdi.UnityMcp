@@ -116,26 +116,24 @@ public sealed class McpEditorServer {
     }
 
     private void RegisterCommands() {
-        // Debug commands
-        m_Commands.Register(new GetLogsCommand(m_LogBuffer)); // Used internally by MCP recompile tool
-        m_Commands.Register(new GetLogsTextCommand(m_LogBuffer));
+        // unity.bridge.* - called by name from the bridge's native tools; renaming one breaks that bridge
+        m_Commands.Register(new BridgeListToolsCommand(m_Commands)); // dynamic tool discovery (#243)
+        m_Commands.Register(new BridgeRecompileCommand());
+        m_Commands.Register(new BridgeGetCompilationStatusCommand());
+        m_Commands.Register(new BridgeRefreshAssetsCommand());
+        m_Commands.Register(new BridgeGetLogsCommand(m_LogBuffer));
+        m_Commands.Register(new BridgeInvokeManagedMethodCommand());
+        m_Commands.Register(new BridgeRunTestsCommand());
+        m_Commands.Register(new BridgeGetTestRunStatusCommand());
+
+        // Agent-facing tools (IMcpToolProvider) - reached through unity.bridge.listTools, so their command names are free to change
+        m_Commands.Register(new GetLogsCommand(m_LogBuffer));
         m_Commands.Register(new ClearLogsCommand(m_LogBuffer, m_Logger));
-
-        // Editor commands
-        m_Commands.Register(new RecompileCommand());
-        m_Commands.Register(new GetCompilationStatusCommand()); // Used internally by MCP recompile tool
-        m_Commands.Register(new IsPlayingCommand());
+        m_Commands.Register(new GetPlayModeStateCommand());
         m_Commands.Register(new SetPlayModeCommand());
-        m_Commands.Register(new RefreshAssetsCommand());
         m_Commands.Register(new ExecuteMenuItemCommand());
-        m_Commands.Register(new InvokeManagedMethodCommand());
         m_Commands.Register(new GetInvocationResultCommand());
-
-        // Tool discovery for the stdio bridge (#243)
-        m_Commands.Register(new ListToolsCommand(m_Commands));
-        m_Commands.Register(new RunTestsCommand());
-        m_Commands.Register(new GetTestRunStatusCommand()); // Used internally by MCP run_tests tool
-        m_Commands.Register(new GetTestRunStatusSummaryCommand());
+        m_Commands.Register(new GetTestRunStatusCommand());
         m_Commands.Register(new CancelTestRunCommand());
     }
 

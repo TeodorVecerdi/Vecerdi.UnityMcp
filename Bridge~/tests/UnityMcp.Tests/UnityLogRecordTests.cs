@@ -60,34 +60,4 @@ public sealed class UnityLogRecordTests {
 
         Assert.Empty(UnityLogRecord.Since(records, marker));
     }
-
-    [Fact]
-    public void TimestampLabel_FormatsUtcOrDashes() {
-        var withTs = new UnityLogRecord { Timestamp = new DateTimeOffset(2026, 7, 11, 13, 5, 9, 123, TimeSpan.Zero) };
-        Assert.Equal("13:05:09.123", withTs.TimestampLabel());
-        Assert.Equal("--", new UnityLogRecord { Timestamp = null }.TimestampLabel());
-    }
-
-    [Fact]
-    public void LogBufferInfo_Wrapped_ProducesNote() {
-        var info = LogBufferInfo.FromResult(Payload("""{ "droppedSinceStart": 42, "capacity": 1000 }"""));
-        Assert.True(info.Wrapped);
-        Assert.Contains("42 older entries", info.Note());
-        Assert.Contains("buffer holds 1000", info.Note());
-    }
-
-    [Fact]
-    public void LogBufferInfo_NoDrops_HasNoNote() {
-        var info = LogBufferInfo.FromResult(Payload("""{ "droppedSinceStart": 0, "capacity": 1000 }"""));
-        Assert.False(info.Wrapped);
-        Assert.Null(info.Note());
-    }
-
-    [Fact]
-    public void LogBufferInfo_FieldAbsent_IsUnknownAndSilent() {
-        var info = LogBufferInfo.FromResult(Payload("""{ "total": 3 }"""));
-        Assert.Null(info.DroppedSinceStart);
-        Assert.False(info.Wrapped);
-        Assert.Null(info.Note());
-    }
 }

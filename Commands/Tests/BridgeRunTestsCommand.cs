@@ -8,10 +8,10 @@ using Object = UnityEngine.Object;
 namespace Vecerdi.UnityMcp.Commands;
 
 /// <summary>
-/// Command: unity.editor.runTests - Start a Unity Test Runner execution.
+/// Command: unity.bridge.runTests - Start a Unity Test Runner execution.
 /// </summary>
-public sealed class RunTestsCommand : IMcpCommandHandler {
-    public string Command => "unity.editor.runTests";
+public sealed class BridgeRunTestsCommand : IMcpCommandHandler {
+    public string Command => "unity.bridge.runTests";
 
     public McpResponse Execute(McpRequest request) {
         if (EditorApplication.isCompiling || EditorApplication.isUpdating) {

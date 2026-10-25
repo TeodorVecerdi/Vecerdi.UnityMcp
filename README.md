@@ -95,20 +95,20 @@ Built into the bridge, because they need its orchestration or state:
 |------|-------------|
 | `sync_and_compile` | **The default "make my edits take effect" call.** Refresh, recompile, wait out the domain reload, and return fresh diagnostics, as one operation |
 | `refresh_assets` | Refresh the asset database and report whether that triggered a compile (prefer `sync_and_compile` for code changes) |
-| `get_logs` | Recent console logs, with timestamps and a note when the buffer wrapped |
 | `invoke_managed_method` | Invoke a managed method via reflection with JSON arguments. Async results (Task, ValueTask, UniTask, Awaitable) are awaited up to `waitMs`, then backgrounded |
 | `run_tests` | Run tests with filters, optionally waiting for completion |
-| `get_test_run_status` | Status and results of a test run |
-| `cancel_test_run` | Cancel an active test run |
 | `list_editors` / `select_editor` | Discover running editors and set the default target |
 
 Advertised by the editor (the live set is whatever the connected editor exposes):
 
 | Tool | Description |
 |------|-------------|
+| `get_logs` | Recent console logs, with timestamps and a note when the buffer wrapped |
+| `clear_logs` | Clear the log buffer |
+| `get_test_run_status` | Status and results of a test run |
+| `cancel_test_run` | Cancel an active test run |
 | `get_play_mode_state` / `set_play_mode` | Query, enter or exit play mode |
 | `execute_menu_item` | Execute a menu item by path |
-| `clear_logs` | Clear the log buffer |
 | `get_invocation_result` | Poll a backgrounded `invoke_managed_method` call |
 
 ## How the tools behave

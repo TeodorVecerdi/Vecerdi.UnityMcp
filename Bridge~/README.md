@@ -27,17 +27,23 @@ together. Installing, publishing, connecting a client, and the tool reference ar
 Tools come from two places:
 
 - **Native tools** live in this bridge (`UnityTools.cs`): everything with bridge-side logic —
-  `sync_and_compile`'s wait/diagnostics orchestration, `run_tests` polling, `get_logs`
-  formatting, `invoke_managed_method`, and the editor-discovery pair
-  (`list_editors`/`select_editor`).
+  `sync_and_compile`'s wait/diagnostics orchestration, `run_tests` polling,
+  `invoke_managed_method`, and the editor-discovery pair (`list_editors`/`select_editor`).
 - **Dynamic tools** are advertised by the editor itself: Unity-side commands implementing
-  `IMcpToolProvider` are enumerated via `unity.meta.listTools` and registered by
+  `IMcpToolProvider` are enumerated via `unity.bridge.listTools` and registered by
   `DynamicToolManager` whenever an editor connection (re)opens — including the reconnect after
   every domain reload, so a `sync_and_compile` that compiles a new tool makes it appear in the
   same agent session (`notifications/tools/list_changed`). **Adding an editor-side tool
   therefore needs no bridge rebuild**: implement the command + descriptor in
   the editor plugin (`Vecerdi.UnityMcp/` under your project's `Assets/`), register it in `McpEditorServer`, recompile.
   Native tool names shadow dynamic ones, so bridge tools can be migrated gradually.
+
+Editor commands follow the same split. The ones the bridge calls by name live under `unity.bridge.*`
+(`Bridge*Command` on the Unity side): `listTools`, the compile and refresh pair, the structured
+`getLogs` that `sync_and_compile` reads diagnostics from, `invokeManagedMethod`, and `runTests` /
+`getTestRunStatus`. They are the protocol between the two halves, so renaming or reshaping one
+breaks every published bridge that uses it. Commands that back a dynamic tool are reached through
+`listTools`, so their names are free to change.
 
 ## Layout
 
@@ -98,10 +104,11 @@ The bridge communicates with Unity via a WebSocket server running in the Editor.
 │   └── McpMessage.cs         # Request/Response types
 └── Commands/
     ├── McpCommandRegistry.cs # Dispatch + IMcpToolProvider/McpToolDescriptor
-    ├── MetaCommands.cs       # unity.meta.listTools (dynamic tool discovery)
-    ├── DebugCommands.cs      # getLogs, clearLogs
+    ├── MetaCommands.cs       # unity.bridge.listTools (dynamic tool discovery)
     ├── EditorCommands.cs     # recompile, playMode, menu items, editor info
-    └── ManagedInvocationCommands.cs # reflection invoke + pending-invocation registry
+    ├── ManagedInvocationCommands.cs # reflection invoke + pending-invocation registry
+    ├── Console/              # log buffer, get_logs, clear_logs (+ structured getLogs for sync_and_compile)
+    └── Tests/                # run store + summary formatter, runTests, get_test_run_status, cancel_test_run
 ```
 
 ## Development

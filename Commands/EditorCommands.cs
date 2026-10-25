@@ -5,10 +5,10 @@ using Vecerdi.UnityMcp.Protocol;
 namespace Vecerdi.UnityMcp.Commands;
 
 /// <summary>
-/// Command: unity.editor.recompile - Force script recompilation.
+/// Command: unity.bridge.recompile - Force script recompilation.
 /// </summary>
-public sealed class RecompileCommand : IMcpCommandHandler {
-    public string Command => "unity.editor.recompile";
+public sealed class BridgeRecompileCommand : IMcpCommandHandler {
+    public string Command => "unity.bridge.recompile";
 
     public McpResponse Execute(McpRequest request) {
         if (EditorApplication.isPlaying) {
@@ -26,11 +26,11 @@ public sealed class RecompileCommand : IMcpCommandHandler {
 }
 
 /// <summary>
-/// Command: unity.editor.getCompilationStatus - Get current compilation state.
+/// Command: unity.bridge.getCompilationStatus - Get current compilation state.
 /// Used internally by the MCP recompile tool.
 /// </summary>
-public sealed class GetCompilationStatusCommand : IMcpCommandHandler {
-    public string Command => "unity.editor.getCompilationStatus";
+public sealed class BridgeGetCompilationStatusCommand : IMcpCommandHandler {
+    public string Command => "unity.bridge.getCompilationStatus";
 
     public McpResponse Execute(McpRequest request) {
         return McpResponse.Ok(request.Id, new {
@@ -41,10 +41,10 @@ public sealed class GetCompilationStatusCommand : IMcpCommandHandler {
 }
 
 /// <summary>
-/// Command: unity.editor.isPlaying - Check if in play mode.
+/// Command: unity.editor.getPlayModeState - Check if in play mode.
 /// </summary>
-public sealed class IsPlayingCommand : IMcpCommandHandler, IMcpToolProvider {
-    public string Command => "unity.editor.isPlaying";
+public sealed class GetPlayModeStateCommand : IMcpCommandHandler, IMcpToolProvider {
+    public string Command => "unity.editor.getPlayModeState";
 
     public McpToolDescriptor ToolDescriptor { get; } = new(
         "get_play_mode_state",
@@ -110,10 +110,10 @@ public sealed class SetPlayModeCommand : IMcpCommandHandler, IMcpToolProvider {
 }
 
 /// <summary>
-/// Command: unity.editor.refreshAssets - Refresh the asset database.
+/// Command: unity.bridge.refreshAssets - Refresh the asset database.
 /// </summary>
-public sealed class RefreshAssetsCommand : IMcpCommandHandler {
-    public string Command => "unity.editor.refreshAssets";
+public sealed class BridgeRefreshAssetsCommand : IMcpCommandHandler {
+    public string Command => "unity.bridge.refreshAssets";
 
     public McpResponse Execute(McpRequest request) {
         AssetDatabase.Refresh();
