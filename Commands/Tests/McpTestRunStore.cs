@@ -71,10 +71,18 @@ internal static class McpTestRunStore {
         }
     }
 
-    public static void MarkCancelRequested(string runId) {
+    /// <summary>
+    /// Finish a run the Test Runner accepted a cancel for. A cancelled job only runs its cleanup tasks
+    /// (test-framework 1.9: <c>RunOnCancel</c>), never <c>RunFinishedInvocationEvent</c>, so no
+    /// <see cref="OnRunFinished"/> arrives and the run would otherwise stay "running" for good.
+    /// </summary>
+    public static void MarkCancelled(string runId) {
         lock (s_Lock) {
             if (!s_Runs.TryGetValue(runId, out var runState)) return;
-            runState.CancelRequested = true;
+            runState.Status = "cancelled";
+            runState.RunMessage = "Cancelled by request; the Test Runner skips the tests that had not run yet.";
+            runState.FinishedAtUtc = DateTimeOffset.UtcNow;
+            runState.LastUpdatedUtc = runState.FinishedAtUtc.Value;
         }
     }
 
@@ -147,11 +155,7 @@ internal static class McpTestRunStore {
             state.FinishedAtUtc = DateTimeOffset.UtcNow;
             state.LastUpdatedUtc = state.FinishedAtUtc.Value;
 
-            if (state.CancelRequested) {
-                state.Status = "cancelled";
-            } else {
-                state.Status = state.Failed > 0 ? "failed" : "passed";
-            }
+            state.Status = state.Failed > 0 ? "failed" : "passed";
 
             if (!string.IsNullOrWhiteSpace(result.Message)) {
                 state.RunMessage = result.Message;
@@ -206,7 +210,6 @@ internal static class McpTestRunStore {
         public TestRunnerApi? Api { get; set; }
         public McpTestRunCallback? Callback { get; set; }
         public string Status { get; set; } = "running";
-        public bool CancelRequested { get; set; }
         public Filter? Filter { get; set; }
         public int TotalDiscoveredTests { get; set; }
         public int ExecutedTests { get; set; }
@@ -243,7 +246,7 @@ internal static class McpTestRunStore {
             sb.AppendLine($"discovered (entire test tree, all modes - NOT the filter-matched count): {TotalDiscoveredTests}");
 
             sb.AppendLine($"resolved filter: {DescribeResolvedFilter(Filter)}");
-            if (ExecutedTests == 0 && !string.Equals(Status, "running", StringComparison.OrdinalIgnoreCase)) {
+            if (ExecutedTests == 0 && Status is not ("running" or "cancelled")) {
                 sb.AppendLine("WARNING: the filter matched 0 tests - check the resolved filter above (wrong assembly/test name or mode?).");
             }
 

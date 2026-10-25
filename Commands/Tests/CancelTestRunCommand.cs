@@ -33,8 +33,9 @@ public sealed class CancelTestRunCommand : IMcpCommandHandler, IMcpToolProvider 
                 return McpResponse.Fail(request.Id, McpErrorCodes.InvalidParams, $"Test run {runId} could not be cancelled: it has already finished or is already being cancelled.");
             }
 
-            McpTestRunStore.MarkCancelRequested(runId);
-            return McpResponse.Ok(request.Id, $"Requested cancellation of test run {runId}.");
+            McpTestRunStore.MarkCancelled(runId);
+            McpTestRunStore.CleanupCallback(runId);
+            return McpResponse.Ok(request.Id, $"Cancelled test run {runId}. A test already in progress may still finish in the editor.");
         } catch (Exception ex) {
             return McpResponse.Fail(request.Id, McpErrorCodes.ExecutionFailed,
                 $"Failed to cancel test run: {ex.Message}",
