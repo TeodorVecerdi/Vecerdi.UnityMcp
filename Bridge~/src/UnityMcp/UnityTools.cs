@@ -25,61 +25,7 @@ public sealed class UnityTools(UnityConnectionPool pool) {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    /// <summary>
-    /// Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.
-    /// </summary>
-    [McpServerTool(Name = "get_logs"), Description("Get recent Unity console logs. Useful for seeing compilation errors, runtime exceptions, and debug output.")]
-    public async Task<CallToolResult> GetLogs(
-        [Description("Maximum number of log entries to return (default: 100)")] int count = 100,
-        [Description("Minimum log level to include: info, warning, or error")] string? minLevel = null,
-        [Description("Filter logs containing this text (case-insensitive)")] string? filter = null,
-        [Description("Include stack traces for each log entry (very verbose; default: false)")] bool includeStackTraces = false,
-        [Description(PortParamDescription)] int? port = null,
-        CancellationToken ct = default
-    ) {
-        var (unity, connectionError) = await ResolveConnectionAsync(port, ct);
-        if (connectionError is not null) return connectionError;
-
-        var parameters = new Dictionary<string, object?> { ["count"] = count };
-        if (minLevel is not null) parameters["minLevel"] = minLevel;
-        if (filter is not null) parameters["filter"] = filter;
-
-        var response = await unity!.SendAsync("unity.debug.getLogs", parameters, ct);
-        if (ToErrorResult(response) is { } errorResult) return errorResult;
-
-        if (response.Result is not { } result) return Success("No logs available.");
-
-        if (result.TryGetProperty("logs", out var logs) && logs.ValueKind == JsonValueKind.Array) {
-            var records = UnityLogRecord.ReadAll(result);
-            var bufferInfo = LogBufferInfo.FromResult(result);
-            if (records.Count == 0) {
-                var emptyNote = bufferInfo.Note();
-                return Success(emptyNote is null
-                    ? "No logs matching the criteria."
-                    : $"No logs matching the criteria.\n{emptyNote}");
-            }
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"Found {records.Count} log entries:");
-            var note = bufferInfo.Note();
-            if (note is not null) sb.AppendLine(note);
-            sb.AppendLine();
-
-            foreach (var record in records) {
-                sb.AppendLine($"[{record.TimestampLabel()}] [{record.Level.ToUpperInvariant()}] {record.Message}");
-
-                if (includeStackTraces && !string.IsNullOrEmpty(record.StackTrace)) {
-                    sb.AppendLine($"  Stack: {record.StackTrace}");
-                }
-            }
-
-            return Success(sb.ToString());
-        }
-
-        return Success(JsonSerializer.Serialize(result, s_OutputJson));
-    }
-
-    // clear_logs, execute_menu_item, get_play_mode_state, set_play_mode, and
+    // get_logs, clear_logs, execute_menu_item, get_play_mode_state, set_play_mode, and
     // get_invocation_result are served dynamically (#243): the editor advertises them via
     // unity.meta.listTools and DynamicToolManager registers them on connect. Only tools with
     // bridge-side logic (multi-step waits, formatting, discovery) stay native here.
