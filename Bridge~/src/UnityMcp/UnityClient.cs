@@ -63,6 +63,8 @@ public sealed class UnityClient : IUnityConnection {
 
     public event Action? Connected;
 
+    public event Action? ConnectionLost;
+
     public async Task ConnectAsync(CancellationToken ct = default) {
         var opened = false;
         await m_LifecycleLock.WaitAsync(ct);
@@ -244,6 +246,11 @@ public sealed class UnityClient : IUnityConnection {
             tcs.TrySetCanceled();
         }
         m_PendingRequests.Clear();
+
+        // A deliberate disconnect cancels the loop first; anything else means the editor ended the connection.
+        if (!ct.IsCancellationRequested) {
+            ConnectionLost?.Invoke();
+        }
     }
 
     public async ValueTask DisposeAsync() {

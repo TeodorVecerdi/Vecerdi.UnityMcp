@@ -13,6 +13,14 @@ public interface IUnityConnection : IAsyncDisposable {
     /// </summary>
     event Action? Connected;
 
+    /// <summary>
+    /// Raised when the editor's side ends an open connection: it closed the socket (which it does to every
+    /// connection on each domain reload) or the socket broke. Not raised when the bridge disconnects on purpose
+    /// (<see cref="DisconnectAsync"/>, the reconnect loop in <see cref="WaitForConnectionAsync"/>, disposal).
+    /// May be raised on a background thread.
+    /// </summary>
+    event Action? ConnectionLost;
+
     /// <summary>Whether the underlying transport is currently open.</summary>
     bool IsConnected { get; }
 
