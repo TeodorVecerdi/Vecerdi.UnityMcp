@@ -143,4 +143,47 @@ public sealed class UnityConnectionPoolTests {
 
         Assert.All(created.Values, c => Assert.Equal(1, c.DisposeCount));
     }
+
+    [Fact]
+    public async Task ConnectionLost_ReopensTheConnection_AndRaisesConnectionOpened() {
+        var created = new ConcurrentDictionary<int, FakeUnityConnection>();
+        var pool = CreatePool(created);
+        var connection = (FakeUnityConnection)await pool.AcquireAsync(9100);
+        var reopened = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        pool.ConnectionOpened += (port, _) => reopened.TrySetResult(port);
+
+        // The editor closing the socket, as it does on every domain reload.
+        connection.SimulateConnectionLost();
+
+        Assert.Equal(9100, await reopened.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(connection.IsConnected);
+        Assert.Equal(2, connection.ConnectCount);
+    }
+
+    [Fact]
+    public async Task ConnectionLost_WithReconnectAfterLossOff_LeavesTheConnectionClosed() {
+        var created = new ConcurrentDictionary<int, FakeUnityConnection>();
+        var pool = CreatePool(created);
+        pool.ReconnectAfterLoss = false;
+        var connection = (FakeUnityConnection)await pool.AcquireAsync(9100);
+
+        connection.SimulateConnectionLost();
+        await Task.Delay(200);
+
+        Assert.False(connection.IsConnected);
+        Assert.Equal(1, connection.ConnectCount);
+    }
+
+    [Fact]
+    public async Task ConnectionLost_AfterDispose_DoesNotReconnect() {
+        var created = new ConcurrentDictionary<int, FakeUnityConnection>();
+        var pool = CreatePool(created);
+        var connection = (FakeUnityConnection)await pool.AcquireAsync(9100);
+        await pool.DisposeAsync();
+
+        connection.SimulateConnectionLost();
+        await Task.Delay(200);
+
+        Assert.Equal(1, connection.ConnectCount);
+    }
 }

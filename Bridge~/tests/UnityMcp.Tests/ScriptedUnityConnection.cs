@@ -15,6 +15,9 @@ internal sealed class ScriptedUnityConnection : IUnityConnection {
     }
 
     public event Action? Connected;
+
+    // Never raised: scripted runs drive reconnects through WaitForConnectionAsync.
+    public event Action? ConnectionLost { add { } remove { } }
     public bool IsConnected { get; set; } = true;
     public string CurrentUri => "ws://scripted/";
 

@@ -15,6 +15,7 @@ internal sealed class FakeUnityConnection : IUnityConnection {
     }
 
     public event Action? Connected;
+    public event Action? ConnectionLost;
     public bool IsConnected { get; set; }
     public string CurrentUri { get; }
     public int ConnectCount { get; private set; }
@@ -31,6 +32,12 @@ internal sealed class FakeUnityConnection : IUnityConnection {
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>Simulate the editor ending the connection (a domain reload closing it).</summary>
+    public void SimulateConnectionLost() {
+        IsConnected = false;
+        ConnectionLost?.Invoke();
     }
 
     public Task DisconnectAsync() {
