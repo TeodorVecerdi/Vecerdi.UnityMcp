@@ -32,8 +32,11 @@ Tools come from two places:
 - **Dynamic tools** are advertised by the editor itself: Unity-side commands implementing
   `IMcpToolProvider` are enumerated via `unity.bridge.listTools` and registered by
   `DynamicToolManager` whenever an editor connection (re)opens — including the reconnect after
-  every domain reload, so a `sync_and_compile` that compiles a new tool makes it appear in the
-  same agent session (`notifications/tools/list_changed`). **Adding an editor-side tool
+  every domain reload, so a recompile that adds a new tool makes it appear in the same agent
+  session (`notifications/tools/list_changed`). The editor closes every connection when it
+  reloads, and the bridge reopens it in the background once the editor is back, so this holds for
+  reloads the bridge didn't cause (a recompile from the editor or IDE) too, not just for
+  `sync_and_compile`. **Adding an editor-side tool
   therefore needs no bridge rebuild**: implement the command + descriptor in
   the editor plugin (`Vecerdi.UnityMcp/` under your project's `Assets/`), register it in `McpEditorServer`, recompile.
   Native tool names shadow dynamic ones, so bridge tools can be migrated gradually.
